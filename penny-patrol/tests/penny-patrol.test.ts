@@ -1334,6 +1334,8 @@ const VERGE = [
   entry('A model ships', '<![CDATA[<p>Acme has shipped a model \u001b[31mwith an escape in it to 40 countries.</p>]]>', 1004702),
   entry('Ethical AI', '<![CDATA[<p>Can affordable ethical AI scale up at Acme in 2027?</p>]]>', 1004703),
   entry('A model goes abroad', '<![CDATA[<p>They shipped it to 40 countries on Monday.</p>]]>', 1004704),
+  // Escaped twice, and naming nothing: the figures of an entity left in it are no figure of the story's.
+  entry('On sleep, again', '&lt;p&gt;Sleep is one of life&amp;#8217;s great puzzles for most people.&lt;/p&gt;', 1004705),
   '</feed>',
 ].join('\n')
 const POSITIVE = [
@@ -1924,11 +1926,14 @@ test('/clear answers a suggestion about the context too: the line says what the 
   world.messages = 0
   await measure($, 'context')
   expect((await lineOf(ui))?.text).toBe('It shows: after /clear the context went from 80k to 20k tokens, so every request from here sends 75% less.')
-  // The new conversation's first prompt leaves it its four minutes; nothing else of the old one is kept.
+  // The new conversation's first prompt leaves it its four minutes (the band is drawn again a second
+  // into the turn); nothing else of the old conversation is kept.
   await turnStart($, 'a new task')
+  await world.clock.advance(1_000)
   expect((await lineOf(ui))?.text).toMatch(/^It shows: after \/clear/)
   await turnEnd($)
-  await world.clock.advance(240_000)
+  await stop($, [])
+  await world.clock.advance(239_000)
   expect((await lineOf(ui))?.label).not.toBe('For you')
 })
 
