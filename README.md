@@ -78,16 +78,23 @@ Its face says how things are:
 **In a small terminal** (narrower than 65 columns, or where the band may not take its nine rows) the
 bars are drawn alone, each with its figures, and the mascot stays home.
 
-## Commands
+## Slash commands
+
+Penny Patrol ships one slash command, `/penny-patrol`, with these forms. Type it in the prompt like any
+other; each answers at once and none of them sends a request to the model.
 
 | Command | What it does |
 | --- | --- |
-| `/penny-patrol` | Hide the band, or show it again. This session only. |
-| `/penny-patrol costs` | The ledger: every prompt, what it cost, the tokens that explain it, and the hourly rate while working. |
+| `/penny-patrol` | Hide the band, or show it again. This session only; the choice is remembered. |
+| `/penny-patrol costs` | Print the ledger: every prompt, what it cost, the tokens that explain it, and the hourly rate while working. |
 | `/penny-patrol audit` | Check the figures against each other and against what Claude Code reports. |
-| `/penny-patrol budget 8000` | Set the month's budget in dollars. `budget off` clears it. |
+| `/penny-patrol budget` | Say what the month's budget is. |
+| `/penny-patrol budget <dollars>` | Set the month's budget, for example `/penny-patrol budget 8000`. `$8,000` works too. Every session on this machine takes it up. |
+| `/penny-patrol budget off` | Clear the budget. |
 
-`/penny-patrol costs` looks like this:
+Anything else after `/penny-patrol` prints this list in one line.
+
+**`/penny-patrol costs`** prints:
 
 ```
 Session total reported by Claude Code: $12.48
@@ -102,6 +109,23 @@ Session total reported by Claude Code: $12.48
                 main $2.11 · claude-opus-5-5 · in 1.2k, out 8.4k, cache read 2.1M, cache write 35k (98% of input from cache)
                 general-purpose "Independent verification of the fix" $0.72 · claude-opus-5-5 · in 400, out 12k, ...
 ```
+
+**`/penny-patrol audit`** prints one line a check. `ok` holds, `OFF` does not, `note` is a fact with
+nothing to check it against:
+
+```
+ok   context: the categories in use add up to 121,400; Claude Code reports 121,400 in use
+ok   context: in use, free and buffer add up to 200,000; the window is 200,000
+ok   context: 121,400 of 200,000 is 61%
+note the last request sent 119,800 tokens in (1,200 new, 116,500 read from the cache, 2,100 written to it) and got 1,900 out; the bar's total is Claude Code's estimate for the next one
+ok   cost: prompts $12.48 + earlier $0.00 + before tracking $0.00 = $12.48; Claude Code reports $12.48
+ok   cost: main $9.61 + subagents $2.87 = the prompts' $12.48
+ok   steps: this session's days hold 3,412; its ledger counts 3,412
+note limits as read 4s ago by a session on this machine
+```
+
+**`/penny-patrol budget 8000`** answers `Budget set: $8,000.00 a month, counted from what this machine's
+sessions spend.` and the month's bar starts draining it.
 
 ## How the money is tracked
 
