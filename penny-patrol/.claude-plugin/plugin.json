@@ -1,0 +1,10 @@
+{
+  "name": "penny-patrol",
+  "version": "0.1.0",
+  "description": "Three meters above the prompt: the context window, the session's spend and what is left of your limits, with a small mascot that walks them while Claude works.",
+  "author": {
+    "name": "Kumar Aman"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/Kumaraman110/penny-patrol"
+}

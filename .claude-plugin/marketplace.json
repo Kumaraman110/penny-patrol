@@ -1,0 +1,16 @@
+{
+  "name": "penny-patrol",
+  "owner": {
+    "name": "Kumar Aman"
+  },
+  "metadata": {
+    "description": "Penny Patrol, a mod for Claude Code. Unofficial; not affiliated with Anthropic."
+  },
+  "plugins": [
+    {
+      "name": "penny-patrol",
+      "source": "./penny-patrol",
+      "description": "Three meters above the prompt: the context window, the session's spend and what is left of your limits, with a small mascot that walks them while Claude works."
+    }
+  ]
+}
