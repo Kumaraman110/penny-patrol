@@ -1,7 +1,7 @@
 {
   "name": "penny-patrol",
-  "version": "0.1.0",
-  "description": "Three meters above the prompt: the context window, the session's spend and what is left of your limits, with a small mascot that walks them while Claude works.",
+  "version": "0.2.0",
+  "description": "Meters above the prompt: the context window, the session's spend and what is left of your limits, a small mascot that walks them while Claude works, and a line under them with an AI tip, a joke or a piece of good news.",
   "author": {
     "name": "Kumar Aman"
   },
