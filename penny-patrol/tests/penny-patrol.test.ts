@@ -291,8 +291,9 @@ test('the scene and the readout: a limit first with the model beside it, the con
 
   expect(trackOf(120)).toBe(47)
   // A limit bar says what it has to say itself, so the line beside it is another's: the model beside the
-  // five hours, the steps beside the week. What the context and the cost say is beside and under them;
-  // the cost is each window's, and what was spent before the session first looked is neither's.
+  // five hours, the steps beside the week. What the context and the cost say is beside and under them:
+  // the cost is each window's and the plan's month's (what was spent before the session first looked is
+  // none of theirs), and who spent is said whether or not anything was.
   expect(lines.map(line => saidOf(line, 120))).toEqual([
     '',
     '',
@@ -302,8 +303,8 @@ test('the scene and the readout: a limit first with the model beside it, the con
     'Context  30% · 60k / 200k · 107k free',
     '         █ System prompt 4k  █ System tools 16k  █ Messages 40k',
     '         Last request: 60k in (58k cached) · 900 out',
-    'Cost     5h $0.00 · Week $0.00',
-    '',
+    'Cost     5h $0.00 · Week $0.00 · Plan $0.00',
+    '         █ Main $0.00  █ Subagents $0.00',
     '',
     'Steps    Today 0 · Week 0 · Month 0 · Year 0',
   ])
@@ -481,8 +482,8 @@ test('where the scene has no room, by width or by rows, the bars stand alone wit
   const narrow = await mount($, 59)
   const [context, cost, gauges] = await rowsOf(narrow)
   expect(await rowsOf(narrow)).toHaveLength(3)
-  expect(textOf(context!)).toMatch(/^█+░+ {2}30% · 60k \/ 200k · 107k free$/)
-  expect(textOf(cost!)).toMatch(/^░+ +5h \$0\.00 · Week \$0\.00$/)
+  expect(textOf(context!)).toMatch(/^█+░+ +30% · 60k \/ 200k · 107k free$/)
+  expect(textOf(cost!)).toMatch(/^░+ {2}5h \$0\.00 · Week \$0\.00 · Plan \$0\.00$/)
   // The labels take the wider one's width, so the two bars are one length.
   expect(textOf(context!)).toHaveLength(57)
   expect(textOf(cost!)).toHaveLength(57)
@@ -502,7 +503,7 @@ test('where the scene has no room, by width or by rows, the bars stand alone wit
     'Context  30% · 60k / 200k · 107k free',
     '         █ System prompt 4k  █ System tools 16k  █ Messages 40k',
     '',
-    'Cost     5h $0.00 · Week $0.00',
+    'Cost     5h $0.00 · Week $0.00 · Plan $0.00',
     'Steps    Today 0 · Week 0 · Month 0 · Year 0',
   ])
   expect(mascotOf(lowLines)).toMatchObject({ row: 1, at: 0 })
@@ -511,7 +512,7 @@ test('where the scene has no room, by width or by rows, the bars stand alone wit
   // With fewer rows than that, the bars alone.
   const lower = await mount($, 120, 7)
   expect(await rowsOf(lower)).toHaveLength(3)
-  expect(textOf((await rowsOf(lower))[0]!)).toMatch(/^█+░+ {2}30% · 60k \/ 200k · 107k free$/)
+  expect(textOf((await rowsOf(lower))[0]!)).toMatch(/^█+░+ +30% · 60k \/ 200k · 107k free$/)
   await lower.unmount()
 
   // A label gives way before its bar does, last part first.
@@ -562,7 +563,8 @@ test('the cost bar books every rise of the session total to whoever was acting, 
   world.agents = [{ id: 'agent-7', type: 'general-purpose', description: 'Check the build', status: 'completed' }]
   await begin($)
   const ui = await mount($, 120)
-  expect(saidOf((await linesOf(ui))[6]!, 120)).toBe('         Before tracking $2.00')
+  // Who spent is always said, both of them, though neither has yet.
+  expect(saidOf((await linesOf(ui))[6]!, 120)).toBe('         █ Main $0.00  █ Subagents $0.00  Before tracking $2.00')
 
   await turnStart($, 'fix the   flaky\ntest')
   world.usd = 2.3
@@ -605,7 +607,7 @@ test('the cents shown always add up to the total shown, however the parts round'
   const shown = [...lines[6]!.matchAll(/\$(\d+)\.(\d\d)/g)].map(found => Number(found[1]) * 100 + Number(found[2]))
   // $0.012 was seen spent: of the 1,002 cents reported it is one, and that one is the main conversation's.
   expect(saidOf(lines[5]!, 120)).toBe('Cost     $10.02 · This prompt $0.01')
-  expect(saidOf(lines[6]!, 120)).toBe('         █ Main $0.01  Before tracking $10.01')
+  expect(saidOf(lines[6]!, 120)).toBe('         █ Main $0.01  █ Subagents $0.00  Before tracking $10.01')
   expect(shown.reduce((sum, cents) => sum + cents, 0)).toBe(1002)
   expect((await command($, 'costs')).text).toContain('Unaccounted:      $0.00')
   expect((await command($, 'audit')).text).not.toContain('OFF')
@@ -1160,17 +1162,18 @@ test('everything the band names begins with a capital', SLOW, async ($, on) => {
     .map(item => item.replace(/^[\s█▒░]+|[\s█▒░]+$/g, ''))
     .filter(item => /^[A-Za-z]/.test(item))
 
-  expect(named).toEqual(expect.arrayContaining(['Model', 'High effort', 'Steps', 'Today 0', 'Week 0', 'Month 0', 'Year 0', 'Context', 'Cost', 'Week $0.76', 'This prompt $0.76', 'Main $0.31', 'Subagents $0.45', 'Resets in 1h 20m', 'Week limit']))
+  expect(named).toEqual(expect.arrayContaining(['Model', 'High effort', 'Steps', 'Today 0', 'Week 0', 'Month 0', 'Year 0', 'Context', 'Cost', 'Week $0.76', 'Plan $0.76', 'This prompt $0.76', 'Main $0.31', 'Subagents $0.45', 'Resets in 1h 20m', 'Week limit']))
   expect(named.filter(item => !/^[A-Z]/.test(item) && !item.startsWith('test-model'))).toEqual([])
 })
 
-test('with the plan\'s windows known the cost is what was spent in each, and begins again when its window does; the ledger keeps it all', SLOW, async ($, on) => {
+test('with the plan\'s windows known the cost is what was spent in each and in the plan\'s month; a window\'s begins again when it does, and the ledger keeps it all', SLOW, async ($, on) => {
   const world = engine(on, { usd: 5, windows: [{ kind: 'five_hour', percentUsed: 40, resetsAt: soon }, { kind: 'seven_day', percentUsed: 30, resetsAt: later }] })
   await begin($)
   const ui = await mount($, 120)
   const cost = async (): Promise<string[]> => (await linesOf(ui)).slice(8, 10).map(line => saidOf(line, 120))
-  // What was spent before the session first looked is no window's: both begin at nothing.
-  expect(await cost()).toEqual(['Cost     5h $0.00 · Week $0.00', ''])
+  // What was spent before the session first looked is no window's and no month's: all three begin at
+  // nothing.
+  expect(await cost()).toEqual(['Cost     5h $0.00 · Week $0.00 · Plan $0.00', '         █ Main $0.00  █ Subagents $0.00'])
 
   await turnStart($, 'first')
   world.usd = 5.4
@@ -1179,34 +1182,35 @@ test('with the plan\'s windows known the cost is what was spent in each, and beg
   await turnEnd($, 'agent-1')
   world.usd = 6.25
   await turnEnd($)
-  expect(await cost()).toEqual(['Cost     5h $1.25 · Week $1.25 · This prompt $1.25', '         █ Main $0.45  █ Subagents $0.80'])
+  expect(await cost()).toEqual(['Cost     5h $1.25 · Week $1.25 · Plan $1.25 · This prompt $1.25', '         █ Main $0.45  █ Subagents $0.80'])
 
   // The five hours begin again: a window that ends later than the one before it. Its cost is nothing
-  // again and its bar empty; the week's goes on.
+  // again; the week's and the month's go on, and the cost bar, which is the month's, stays as it was.
   const next = new Date(NOW + 6 * 3_600_000).toISOString()
   world.windows = [{ kind: 'five_hour', percentUsed: 2, resetsAt: next }, { kind: 'seven_day', percentUsed: 31, resetsAt: later }]
   await measureLimits($, world)
-  expect(await cost()).toEqual(['Cost     5h $0.00 · Week $1.25 · This prompt $1.25', ''])
-  expect(sceneOf((await linesOf(ui))[8]!, 120)).toBe('░'.repeat(47))
+  expect(await cost()).toEqual(['Cost     5h $0.00 · Week $1.25 · Plan $1.25 · This prompt $1.25', '         █ Main $0.45  █ Subagents $0.80'])
+  expect(barOf((await rowsOf(ui))[8]!).map(([text, ground]) => [text.length, ground])).toEqual([[17, 'permission'], [30, 'cyan_FOR_SUBAGENTS_ONLY']])
 
   await turnStart($, 'second')
   world.usd = 6.75
   await turnEnd($)
-  expect(await cost()).toEqual(['Cost     5h $0.50 · Week $1.75 · This prompt $0.50', '         █ Main $0.50'])
+  expect(await cost()).toEqual(['Cost     5h $0.50 · Week $1.75 · Plan $1.75 · This prompt $0.50', '         █ Main $0.95  █ Subagents $0.80'])
   // The marks are kept with the session, to be there when it loads again: what had been spent in all
-  // when each window was met.
-  expect(fileOf(world, 'sessions/session-one.json')).toMatchObject({ ledger: { seen: 6.75, marks: { five_hour: { resetsAt: next, usd: 6.25 }, seven_day: { resetsAt: later, usd: 5 } } } })
+  // when each window, and the month, was met.
+  expect(fileOf(world, 'sessions/session-one.json')).toMatchObject({ ledger: { seen: 6.75, marks: { five_hour: { resetsAt: next, usd: 6.25 }, seven_day: { resetsAt: later, usd: 5 }, '@plan': { usd: 5 } } } })
 
   // The week begins again too.
   world.windows = [{ kind: 'five_hour', percentUsed: 5, resetsAt: next }, { kind: 'seven_day', percentUsed: 1, resetsAt: new Date(NOW + 9 * 24 * 3_600_000).toISOString() }]
   await measureLimits($, world)
-  expect(await cost()).toEqual(['Cost     5h $0.50 · Week $0.00 · This prompt $0.50', '         █ Main $0.50'])
+  expect(await cost()).toEqual(['Cost     5h $0.50 · Week $0.00 · Plan $1.75 · This prompt $0.50', '         █ Main $0.95  █ Subagents $0.80'])
 
-  // The ledger has all of it still, prompt by prompt, and says what each window's is.
+  // The ledger has all of it still, prompt by prompt, and says what each window's is, and the month's.
   const text = (await command($, 'costs')).text
   expect(text).toContain('Session total reported by Claude Code: $6.75')
-  expect(text).toContain('  This 5h window:   $0.50  (seen spent since it began, or since this session first met it: the band\'s cost)')
+  expect(text).toContain('  This 5h window:   $0.50  (seen spent since it began, or since this session first met it)')
   expect(text).toContain('  This Week window: $0.00')
+  expect(text).toContain('  This plan month:  $1.75  (seen spent since 1 Oct: the band\'s cost bar. /penny-patrol plan <day> says which day your plan renews on)')
   expect(text).toContain('  Itemised below:   $1.75')
   expect(text).toContain('  Before tracking:  $5.00')
   expect(text).toContain('  1.     $1.25  first')
@@ -1223,59 +1227,118 @@ test('a window that runs out begins again there and then, and one with no end to
   world.usd = 2
   await turnEnd($)
   await stop($, [])
-  expect(await cost()).toBe('Cost     5h $1.00 · This prompt $1.00')
+  expect(await cost()).toBe('Cost     5h $1.00 · Plan $1.00 · This prompt $1.00')
+  // The subagents spent nothing: they are named under the bar, and have no cell of it.
+  expect(barOf((await rowsOf(ui))[8]!).map(([text, ground]) => [text.length, ground])).toEqual([[47, 'permission']])
+  expect(saidOf((await linesOf(ui))[9]!, 120)).toBe('         █ Main $1.00  █ Subagents $0.00')
 
-  // Its end passes with nothing asked: the plan has renewed, whether or not a new window was reported.
+  // Its end passes with nothing asked: the window has renewed, whether or not a new one was reported.
+  // The month goes on.
   await world.clock.advance(10 * 60_000 + 5_000)
   expect(sceneOf((await linesOf(ui))[2]!, 120).startsWith(' 5h limit · 60% left · Reset due ')).toBe(true)
-  expect(await cost()).toBe('Cost     5h $0.00 · This prompt $1.00')
+  expect(await cost()).toBe('Cost     5h $0.00 · Plan $1.00 · This prompt $1.00')
   // The next window is reported with the first spend in it: that spend is its own.
   await turnStart($, 'more')
   world.windows = [{ kind: 'five_hour', percentUsed: 3, resetsAt: new Date(NOW + 5 * 3_600_000).toISOString() }]
   world.usd = 2.3
   await turnEnd($)
-  expect(await cost()).toBe('Cost     5h $0.30 · This prompt $0.30')
+  expect(await cost()).toBe('Cost     5h $0.30 · Plan $1.30 · This prompt $0.30')
 
   // With no end told, more of it used is the same window; so is less of it by under a point; less of
   // it by more than that is a new one.
   world.windows = [{ kind: 'five_hour', percentUsed: 30 }]
   await measureLimits($, world)
-  expect(await cost()).toBe('Cost     5h $0.30 · This prompt $0.30')
+  expect(await cost()).toBe('Cost     5h $0.30 · Plan $1.30 · This prompt $0.30')
   await turnStart($, 'again')
   world.usd = 2.7
   await turnEnd($)
   world.windows = [{ kind: 'five_hour', percentUsed: 29.5 }]
   await measureLimits($, world)
-  expect(await cost()).toBe('Cost     5h $0.70 · This prompt $0.40')
+  expect(await cost()).toBe('Cost     5h $0.70 · Plan $1.70 · This prompt $0.40')
   world.windows = [{ kind: 'five_hour', percentUsed: 4 }]
   await measureLimits($, world)
-  expect(await cost()).toBe('Cost     5h $0.00 · This prompt $0.40')
+  expect(await cost()).toBe('Cost     5h $0.00 · Plan $1.70 · This prompt $0.40')
 })
 
-test('a session that loads again has its windows where it left them; one kept before they were followed starts from where it is', SLOW, async ($, on) => {
+test('a session that loads again has its windows where it left them; one kept before they were followed starts from where it is, and its month from its days', SLOW, async ($, on) => {
   const world = engine(on, { usd: 9, windows: [{ kind: 'five_hour', percentUsed: 40, resetsAt: soon }] })
-  const turn = { seq: 1, label: 'earlier', main: 8, tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, model: null, agents: {} }
-  const ledger = { seen: 9, untracked: 1, folded: { usd: 0, prompts: 0 }, steps: 0, nextSeq: 2, turns: [turn], agents: {} }
+  const none = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+  const ledger = { seen: 9, untracked: 1, folded: { usd: 0, prompts: 0 }, steps: 0, nextSeq: 2, turns: [{ seq: 1, label: 'earlier', main: 8, tokens: none, model: null, agents: {} }], agents: {} }
   // Six dollars had been spent when this window was met: three of the nine are its.
   put(world, 'sessions/session-one.json', { ledger: { ...ledger, spent: { main: 8, agents: 0 }, marks: { five_hour: { resetsAt: soon, used: 35, usd: 6, main: 5, agents: 0 } } }, effort: null, isHidden: false })
   put(world, 'sessions/session-two.json', { ledger, effort: null, isHidden: false })
-  put(world, 'sessions/session-three.json', { ledger: { ...ledger, marks: { five_hour: { resetsAt: soon, used: 35, usd: 'six' } } }, effort: null, isHidden: false })
+  // A session older than the plan's month: three of its eight dollars were spent on a day before the 1st.
+  put(world, 'sessions/session-three.json', { ledger: { ...ledger, turns: [{ seq: 1, label: 'earlier', main: 6, tokens: none, model: null, agents: { 'agent-1': 2 } }] }, effort: null, isHidden: false })
+  put(world, 'days/session-three.json', { '2026-09-20': { steps: 0, usd: 3 }, '2026-10-02': { steps: 0, usd: 5 } })
+  put(world, 'sessions/session-four.json', { ledger: { ...ledger, marks: { five_hour: { resetsAt: soon, used: 35, usd: 'six' } } }, effort: null, isHidden: false })
   await begin($)
   const ui = await mount($, 120)
   const cost = async (): Promise<string[]> => (await linesOf(ui)).slice(8, 10).map(line => saidOf(line, 120))
-  expect(await cost()).toEqual(['Cost     5h $3.00 · This prompt $8.00', '         █ Main $3.00'])
+  // All it was seen spending is the month's: it has no day before the 1st.
+  expect(await cost()).toEqual(['Cost     5h $3.00 · Plan $8.00 · This prompt $8.00', '         █ Main $8.00  █ Subagents $0.00'])
 
   // A ledger from before the windows were followed: what it holds cannot be told apart by window, so
-  // the window's cost starts from here.
+  // the window's cost starts from here. The month's is worked out from its days.
   world.sessionId = 'session-two'
   world.startedAt = 2
   await call($)
-  expect(await cost()).toEqual(['Cost     5h $0.00 · This prompt $8.00'])
-  // One whose marks are not what marks are is no ledger: the session starts its own.
+  expect(await cost()).toEqual(['Cost     5h $0.00 · Plan $8.00 · This prompt $8.00', '         █ Main $8.00  █ Subagents $0.00'])
+  // Five of the eight dollars since the 1st, split as all eight are: three to one.
   world.sessionId = 'session-three'
   world.startedAt = 3
+  await world.clock.advance(10_000)
+  await call($)
+  expect(await cost()).toEqual(['Cost     5h $0.00 · Plan $5.00 · This prompt $8.00', '         █ Main $3.75  █ Subagents $1.25'])
+  // One whose marks are not what marks are is no ledger: the session starts its own.
+  world.sessionId = 'session-four'
+  world.startedAt = 4
   await call($)
   expect((await command($, 'costs')).text).toContain('Before tracking:  $9.00')
+})
+
+test('the plan\'s month: the cost bar is its, counted from the day the plan renews on, and it begins again that day', SLOW, async ($, on) => {
+  const world = engine(on, { usd: 5, windows: twoWindows })
+  await begin($)
+  const ui = await mount($, 120)
+  const cost = async (): Promise<string[]> => (await linesOf(ui)).slice(8, 10).map(line => saidOf(line, 120))
+  await turnStart($, 'first')
+  world.usd = 5.4
+  await call($)
+  world.usd = 6.2
+  await turnEnd($, 'agent-1')
+  world.usd = 6.25
+  await turnEnd($)
+  await stop($, [])
+  const spent = ['Cost     5h $1.25 · Week $1.25 · Plan $1.25 · This prompt $1.25', '         █ Main $0.45  █ Subagents $0.80']
+  expect(await cost()).toEqual(spent)
+
+  // Until it is told the day, the month is the calendar's.
+  expect((await command($, 'plan')).text).toBe('The plan\'s month is counted from the 1st: the day your plan renews on is not set. Its month now running began on 1 Oct and ends on 1 Nov. Set it with /penny-patrol plan 14.')
+  expect((await command($, 'plan 40')).text).toContain('Say the day of the month your plan renews on, 1 to 31')
+  expect((await command($, 'plan 1.5')).text).toContain('Say the day of the month your plan renews on, 1 to 31')
+  // Told the 5th, on the 4th: the month began a month ago, and all of this session is in it.
+  expect((await command($, 'plan 5')).text).toBe('Your plan renews on the 5th. Its month now running began on 5 Sep and ends on 5 Oct. /penny-patrol plan off counts from the 1st.')
+  expect(fileOf(world, 'settings.json')).toEqual({ budget: null, lines: 'off', isIntroduced: true, plan: 5 })
+  expect(await cost()).toEqual(spent)
+
+  // Midnight: the plan renews. The month's cost is nothing again and its bar empty, though who spent
+  // is still named; the week's goes on. (The five hours ran out in the evening.)
+  // (An hour at a time: the clock is moved no more than ten thousand ticks at once.)
+  for (let hour = 0; hour < 12; hour += 1) {
+    await world.clock.advance(3_600_000)
+  }
+
+  await world.clock.advance(5_000)
+  expect(await cost()).toEqual(['Cost     5h $0.00 · Week $1.25 · Plan $0.00 · This prompt $1.25', '         █ Main $0.00  █ Subagents $0.00'])
+  expect(sceneOf((await linesOf(ui))[8]!, 120)).toBe('░'.repeat(47))
+  const text = (await command($, 'costs')).text
+  expect(text).toContain('  This plan month:  $0.00  (seen spent since 5 Oct: the band\'s cost bar. /penny-patrol plan <day> says which day your plan renews on)')
+  expect(text).toContain('  1.     $1.25  first')
+
+  // Counted from the 1st again: the month that began on the 1st has the 4th's spending in it.
+  expect((await command($, 'plan off')).text).toContain('The plan\'s month is counted from the 1st: the day your plan renews on is not set. Its month now running began on 1 Oct and ends on 1 Nov.')
+  expect(fileOf(world, 'settings.json')).toEqual({ budget: null, lines: 'off', isIntroduced: true })
+  expect(await cost()).toEqual(['Cost     5h $0.00 · Week $1.25 · Plan $1.25 · This prompt $1.25', '         █ Main $0.45  █ Subagents $0.80'])
 })
 
 // What the feeds answer in these tests: the head of a changelog, two kinds of jokes, and four outlets'
@@ -1347,6 +1410,8 @@ const POSITIVE = [
   story('Kosovo was cleared of landmines after 27 years of work', 'Kosovo was cleared of landmines after 27 years of work.', 'https://www.positive.news/?p=594045', 'https://www.positive.news/kosovo/'),
   story('A village rebuilds', 'A village in Kerala has rebuilt its school in 9 months. Could yours do the same?', 'https://www.positive.news/?p=594800', 'https://www.positive.news/village/'),
   story('The Spark', 'The Spark is generously supported by Laura Rice of Denver, who reads every issue.', 'https://www.positive.news/?p=594801', 'https://www.positive.news/spark/'),
+  story('A phone for children', 'A new phone for children called Freckle is betting on it.', 'https://www.positive.news/?p=594802', 'https://www.positive.news/phone/'),
+  story('Kneecap on tour', 'The trio gained attention with the film they made about themselves in 2024.', 'https://www.positive.news/?p=594803', 'https://www.positive.news/trio/'),
   '</channel></rss>',
 ].join('\n')
 const GOOD_NEWS = [
@@ -1354,15 +1419,21 @@ const GOOD_NEWS = [
   story('Underwater Umbrellas Could Protect Coral Reefs From Heat Damage', 'Underwater umbrellas could protect coral reefs from heat &#8211; and even partly reverse the bleaching, according to a new study by Florida scientists. The shades cut the light by a third [&#8230;]', 'https://www.goodnewsnetwork.org/?p=241699', 'https://www.goodnewsnetwork.org/underwater-umbrellas/'),
   story('Town Rallies After Crash Kills Two', 'Hundreds of neighbours in Ohio came together on Sunday.', 'https://www.goodnewsnetwork.org/?p=241700', 'https://www.goodnewsnetwork.org/sad/'),
   story('Good News in History, October 5', '20 years ago today, a rock star opened a kitchen in New Jersey.', 'https://www.goodnewsnetwork.org/?p=241701', 'https://www.goodnewsnetwork.org/history/'),
-  story('Fan Becomes a Hero', 'When Alastair Cass got outside, he heard a woman&#8217;s cries [&#8230;]', 'https://www.goodnewsnetwork.org/?p=241675', 'https://www.goodnewsnetwork.org/fan/'),
+  story('Fan Becomes a Hero', 'When Alastair Cass got outside after his football team had lost on television that evening, he heard a woman&#8217;s cries from the [&#8230;]', 'https://www.goodnewsnetwork.org/?p=241675', 'https://www.goodnewsnetwork.org/fan/'),
   story('Comedy Wildlife Finalists', 'It&#8217;s that time of the year again. The awards just released the 40 finalists for 2026.', 'https://www.goodnewsnetwork.org/?p=241735', 'https://www.goodnewsnetwork.org/comedy/'),
   story('Rare Ghost Lobster Goes to School', 'A &#8216;ghost&#8217; lobster so rare that the odds of finding one are 1 in 100 million is going to school.', 'urn:uuid:9', 'https://www.goodnewsnetwork.org/ghost-lobster/'),
   story('Nonprofit Brings Free Music Education to 20,000 Students', 'A nonprofit in Miami has brought free music lessons to 20,000 students.', 'urn:uuid:10', 'https://evil.example.com/steal'),
   story('Japan Has More Centenarians Than Ever', 'There are 107,677 people in Japan who are aged 100 or older, according to health ministry figures.', 'https://www.goodnewsnetwork.org/?p=241800', 'https://www.goodnewsnetwork.org/centenarians/'),
+  story('A Dog Finds a Home', 'A stray dog that waited outside a hospital for weeks has found a home.', 'https://www.goodnewsnetwork.org/?p=241810', 'https://www.goodnewsnetwork.org/dog/'),
+  story('A Rucksack and a Hard Year', 'It was only a rucksack. Sampson James used it to carry his things through a hard year.', 'https://www.goodnewsnetwork.org/?p=241811', 'https://www.goodnewsnetwork.org/rucksack/'),
+  story('An Island Like No Other', 'Existing with a unique ecology, it has been clear to anyone that [&#8230;]', 'https://www.goodnewsnetwork.org/?p=241812', 'https://www.goodnewsnetwork.org/island/'),
+  story('Montana Rescue', 'From Big Sky Country comes a rescue story that even a scriptwriter would pass over.', 'https://www.goodnewsnetwork.org/?p=241813', 'https://www.goodnewsnetwork.org/montana/'),
+  story('A Block Cleaned Up', 'He started by filming himself picking up litter. Now, he has raised over $55,000 and changed a whole block.', 'https://www.goodnewsnetwork.org/?p=241814', 'https://www.goodnewsnetwork.org/block/'),
+  story('Rescuers Reach a Village After Earthquakes', 'Teams from nine countries have reached a village in the hills.', 'https://www.goodnewsnetwork.org/?p=241815', 'https://www.goodnewsnetwork.org/rescue/'),
   story('UK Museums Stay Free', 'After months of talks between UK ministries, the government has decided that the national museums of the country will remain free to every single visitor from anywhere in the world for good.', 'https://www.goodnewsnetwork.org/?p=241652', 'https://www.goodnewsnetwork.org/museums/'),
   '</channel></rss>',
 ].join('\n')
-// Seven of the nine feeds answer; the other two are down.
+// Eleven of the thirteen feeds answer (one outlet's four with the same stories); the other two are down.
 const online = (world: World): void => {
   world.feeds.set('https://raw.githubusercontent.com/', CHANGELOG)
   world.feeds.set('https://the-decoder.com/', DECODER)
@@ -1372,7 +1443,10 @@ const online = (world: World): void => {
   world.feeds.set('https://www.positive.news/', POSITIVE)
   world.feeds.set('https://www.goodnewsnetwork.org/', GOOD_NEWS)
 }
-const HOSTS = ['raw.githubusercontent.com', 'the-decoder.com', 'techcrunch.com', 'www.theverge.com', 'icanhazdadjoke.com', 'v2.jokeapi.dev', 'www.positive.news', 'www.goodnewsnetwork.org', 'www.optimistdaily.com']
+// Where each feed is asked for, in the order they are read: one outlet gives its front page and three of
+// its sections.
+const ASKED = ['raw.githubusercontent.com', 'the-decoder.com', 'techcrunch.com', 'www.theverge.com', 'icanhazdadjoke.com', 'v2.jokeapi.dev', 'www.positive.news', 'www.goodnewsnetwork.org', 'www.goodnewsnetwork.org', 'www.goodnewsnetwork.org', 'www.goodnewsnetwork.org', 'www.optimistdaily.com', 'www.goodgoodgood.co']
+const HOSTS = [...new Set(ASKED)]
 const CHANGELOG_PAGE = 'https://code.claude.com/docs/en/changelog'
 // What a session kept of an earlier read: a gist and its link each.
 const UMBRELLAS = { topic: 'news', text: 'Underwater umbrellas could protect coral reefs from heat, a new study by Florida scientists finds.', href: 'https://www.goodnewsnetwork.org/?p=241699' }
@@ -1380,20 +1454,24 @@ const MUDLARK = { topic: 'news', text: 'A mudlark has spent nearly a decade sear
 const KOLIBRI = { topic: 'ai', text: 'Aleph Alpha has released Kolibri, a German-English model with 78 billion parameters.', href: 'https://the-decoder.com/?p=41102' }
 const kept = { format: 2, at: NOW, notes: [UMBRELLAS, MUDLARK, KOLIBRI] }
 
-test('the line under the bars: something about AI, a joke, good news, by turns, another every four minutes', SLOW, async ($, on) => {
+test('the line under the bars: something about AI, a joke, good news, by turns, another every four minutes of work', SLOW, async ($, on) => {
   const world = engine(on, { usd: 1, lines: 'live' })
   put(world, 'lines.json', kept)
   await begin($)
   const ui = await mount($, 220)
   // Three bars over it: nine rows, and the line.
   expect(await rowsOf(ui)).toHaveLength(10)
+  // While nothing runs it stays as it is, however long.
+  const idle = await lineOf(ui)
+  await world.clock.advance(600_000)
+  expect((await lineOf(ui))?.text).toBe(idle?.text)
+  await turnStart($, 'work')
   const seen: Array<{ label: string; color: unknown; text: string }> = []
 
-  // Nothing runs, and nothing needs to: the line goes by the clock.
   for (let turn = 0; turn < 9; turn += 1) {
     const first = await lineOf(ui)
     await world.clock.advance(239_000)
-    // The same thing for four minutes; another at the next.
+    // The same thing for four minutes of work; another at the next.
     expect((await lineOf(ui))?.text).toBe(first?.text)
     await world.clock.advance(1_000)
     seen.push({ label: first?.label ?? '', color: first?.color, text: first?.text ?? '' })
@@ -1407,8 +1485,10 @@ test('the line under the bars: something about AI, a joke, good news, by turns, 
   expect(news.slice(0, 2).sort()).toEqual([`${MUDLARK.text} ${MUDLARK.href}`, `${UMBRELLAS.text} ${UMBRELLAS.href}`])
   expect(news[2]).toBe(news[0])
   expect(new Set(seen.map(note => note.text)).size).toBe(8)
-  // What is fresh is not kept for last: of the notes about AI, the one a feed gave comes first.
+  // What is fresh is not kept for last: of the notes about AI, the one a feed gave comes first. It is
+  // what the line said while nothing ran.
   expect(seen[0]?.text).toBe(`${KOLIBRI.text} ${KOLIBRI.href}`)
+  expect(idle?.text).toBe(seen[0]?.text)
   // Nothing but the settings and what the feeds gave decides it: no request was made for a kept read.
   expect(world.fetched).toEqual([])
 })
@@ -1417,7 +1497,8 @@ test('a line is its label, one space, and the note right after it; a story\'s li
   const world = engine(on, { lines: 'live' })
   put(world, 'lines.json', { format: 2, at: NOW, notes: [UMBRELLAS] })
   await begin($)
-  // The third turn is the good news'.
+  // The third turn is the good news': eight minutes of work in.
+  await turnStart($, 'work')
   await world.clock.advance(480_000)
   const wide = await mount($, 220)
   expect((await lineOf(wide))?.pieces.map(piece => [piece.text, piece.isBold, piece.isDim, piece.href])).toEqual([
@@ -1450,6 +1531,7 @@ test('a note too long for the band is passed over for one that fits; the line gi
   const world = engine(on, { usd: 1, lines: 'offline' })
   await begin($)
   const ui = await mount($, 70)
+  await turnStart($, 'work')
   const lines: Array<{ label: string; text: string }> = []
 
   for (let turn = 0; turn < 12; turn += 1) {
@@ -1493,7 +1575,8 @@ test('the feeds are read through the host when what they gave is old: of a story
   expect(world.fetched).toEqual([])
   await world.clock.advance(4_000)
 
-  expect(world.fetched.map(asked => /^https:\/\/([^/]+)/.exec(asked.url)?.[1])).toEqual(HOSTS)
+  expect(world.fetched.map(asked => /^https:\/\/([^/]+)/.exec(asked.url)?.[1])).toEqual(ASKED)
+  expect(world.fetched.slice(7, 11).map(asked => asked.url)).toEqual(['https://www.goodnewsnetwork.org/feed/', 'https://www.goodnewsnetwork.org/category/news/heroes/feed/', 'https://www.goodnewsnetwork.org/category/news/animals/feed/', 'https://www.goodnewsnetwork.org/category/news/inspiring/feed/'])
   // The changelog's head only, and the jokes as data.
   expect(world.fetched[0]?.headers).toEqual({ Range: 'bytes=0-60000' })
   expect(world.fetched[4]?.headers).toEqual({ Accept: 'application/json' })
@@ -1527,17 +1610,23 @@ test('the feeds are read through the host when what they gave is old: of a story
     { topic: 'joke', text: 'Why did the functional programmer get thrown out of school? Because he refused to take classes.' },
     // Good news: entities and typography made plain; a summary of two sentences whole, and of one where
     // the second is a question; none that opens with a question, no gallery, nothing that only says the
-    // headline again, and nothing about who pays for the outlet.
+    // headline again, nothing about who pays for the outlet, and nothing that points at what it does not
+    // say ("is betting on it", "the trio").
     { topic: 'news', text: 'Seasoned mudlark Emmylou Vaxby has spent nearly a decade searching the Thames foreshore for fragments of the city\'s past', href: 'https://www.positive.news/?p=594738' },
     { topic: 'news', text: 'The UK has one of the highest NEET rates for young adults in Europe. New figures offer some encouragement', href: 'https://www.positive.news/?p=592622' },
     { topic: 'news', text: 'A village in Kerala has rebuilt its school in 9 months.', href: 'https://www.positive.news/?p=594800' },
     // Nothing grim, nothing about the outlet itself, no sentence its feed cut off before it got anywhere,
     // none that leans on another; and where the feed gives no short link, the story's own address. A
+    // story that four of the outlet's feeds gave is one story. A
     // sentence that only seems to set a scene has a figure in it; a long one is cut at the end of a
     // word, not in one, which keeps more of it than its one early comma would.
     { topic: 'news', text: 'Underwater umbrellas could protect coral reefs from heat - and even partly reverse the bleaching, according to a new study by Florida scientists.', href: 'https://www.goodnewsnetwork.org/?p=241699' },
     { topic: 'news', text: 'A \'ghost\' lobster so rare that the odds of finding one are 1 in 100 million is going to school.', href: 'https://www.goodnewsnetwork.org/ghost-lobster/' },
     { topic: 'news', text: 'There are 107,677 people in Japan who are aged 100 or older, according to health ministry figures.', href: 'https://www.goodnewsnetwork.org/?p=241800' },
+    // Good news is told big or small: a story that names no one and no figure is one. But not a sentence
+    // that points back at another, one its feed cut off short, one that only announces a story, or one
+    // that follows a "he" with a "now"; and not a disaster, however good the rescue.
+    { topic: 'news', text: 'A stray dog that waited outside a hospital for weeks has found a home.', href: 'https://www.goodnewsnetwork.org/?p=241810' },
     { topic: 'news', text: 'After months of talks between UK ministries, the government has decided that the national museums of the country will remain free to every single...', href: 'https://www.goodnewsnetwork.org/?p=241652' },
   ])
   // No headline is among them.
@@ -1545,6 +1634,7 @@ test('the feeds are read through the host when what they gave is old: of a story
 
   // What was read is on the line, by turns with what came with the mod: first what is fresh.
   const ui = await mount($, 220)
+  await turnStart($, 'work')
   const said: Array<{ label: string; link: string }> = []
 
   for (let turn = 0; turn < 3; turn += 1) {
@@ -1567,11 +1657,11 @@ test('a read that was kept is not made again until it is an hour old; one that g
   // Fifty minutes old at the start: at the look ten minutes on it is an hour old, and read again. The
   // network is down, so nothing comes of it, and the next try waits half an hour.
   await world.clock.advance(10 * 60_000)
-  expect(world.fetched).toHaveLength(9)
+  expect(world.fetched).toHaveLength(13)
   await world.clock.advance(20 * 60_000)
-  expect(world.fetched).toHaveLength(9)
+  expect(world.fetched).toHaveLength(13)
   await world.clock.advance(10 * 60_000)
-  expect(world.fetched).toHaveLength(18)
+  expect(world.fetched).toHaveLength(26)
   // What was kept is kept: a read that gives nothing takes nothing away.
   expect(fileOf(world, 'lines.json')).toMatchObject({ at: NOW - 50 * 60_000 })
 })
@@ -1584,8 +1674,9 @@ test('what was kept in another format is of no use: the feeds are read anew, and
   await begin($)
   const ui = await mount($, 220)
   await world.clock.advance(4_000)
-  expect(world.fetched).toHaveLength(9)
+  expect(world.fetched).toHaveLength(13)
   expect(fileOf(world, 'lines.json')).toMatchObject({ format: 2, at: NOW + 4_000 })
+  await turnStart($, 'work')
   const said: string[] = []
 
   for (let turn = 0; turn < 18; turn += 1) {
@@ -1611,6 +1702,7 @@ test('what a session kept of the feeds is read back as carefully as the feeds th
   ] })
   await begin($)
   const ui = await mount($, 220)
+  await turnStart($, 'work')
   const news: Array<ReturnType<typeof piecesOf>> = []
 
   for (let turn = 0; turn < 12; turn += 1) {
@@ -1644,6 +1736,7 @@ test('/penny-patrol lines says where the line reads from and changes it: live, o
   put(world, 'lines.json', kept)
   await begin($)
   const ui = await mount($, 220)
+  await turnStart($, 'work')
   const offline: Array<string | undefined> = []
 
   for (let turn = 0; turn < 6; turn += 1) {
@@ -1662,8 +1755,8 @@ test('/penny-patrol lines says where the line reads from and changes it: live, o
 
   // Live: read at once, and said, with how often the line and the feeds turn over.
   text = (await command($, 'lines live')).text
-  expect(world.fetched).toHaveLength(9)
-  expect(text).toContain('The line under the bars is live: what came with the mod, and 19 notes read from the feeds 0s ago. It says something else every 4 minutes; the feeds are read again every 60.')
+  expect(world.fetched).toHaveLength(13)
+  expect(text).toContain('The line under the bars is live: what came with the mod, and 20 notes read from the feeds 0s ago. It says something else every 4 minutes of work; the feeds are read again every 60 minutes.')
   expect(fileOf(world, 'settings.json')).toEqual({ budget: null, lines: 'live', isIntroduced: true })
 
   // Off: no line, the scene as it was.
@@ -1686,7 +1779,11 @@ test('on a machine that has not been told, the line says once that it reads the 
   expect(first).toMatchObject({ label: 'For you', color: 'warning' })
   expect(first?.text).toBe('This line also reads a few public feeds, every hour, for fresh jokes, AI news and good news. /penny-patrol lines offline keeps it to what came with the mod.')
   expect(fileOf(world, 'settings.json')).toEqual({ budget: null, lines: 'live', isIntroduced: true })
-  // It holds the line for four minutes, then the notes take their turns.
+  // It holds the line for four minutes of work, however long nothing runs before that; then the notes
+  // take their turns.
+  await world.clock.advance(600_000)
+  expect((await lineOf(ui))?.label).toBe('For you')
+  await turnStart($, 'work')
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.label).toBe('For you')
   await world.clock.advance(1_000)
@@ -1724,30 +1821,39 @@ test('every five to ten prompts the line makes a suggestion from the session\'s 
   expect(suggested[0]!.text).toBe('Context is 86% full, 152k of it messages. /compact swaps those for a summary: the bar would fall toward 10%, and every request sends that much less.')
   // What was just said is not said again while there is something else.
   expect(suggested[1]!.text).toBe('Every request sends all 172k tokens of this conversation again. When the task changes, /clear: the next one sends about 20k.')
-  // It holds the line four minutes by the clock, working or not; then the notes take their turns again.
+  // It holds the line through four minutes of work, and for as long as nothing runs; then the notes
+  // take their turns again.
+  await stop($, [])
+  await world.clock.advance(600_000)
   expect((await lineOf(ui))?.label).toBe('For you')
+  await turnStart($, 'work')
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.label).toBe('For you')
   await world.clock.advance(1_000)
   expect(['AI', 'Joke']).toContain((await lineOf(ui))?.label)
 })
 
-test('a suggestion takes a turn of its own: the line is drawn again the second it ends, and the note after it has its whole four minutes', SLOW, async ($, on) => {
+test('a suggestion takes a turn of its own: the note after it has its whole four minutes of work', SLOW, async ($, on) => {
   const world = engine(on, { messages: 10_000, lines: 'offline' })
   await begin($)
   const ui = await mount($, 220)
-  // A hundred seconds into the first turn, the suggestion.
+  // A hundred seconds of work into the first turn, the suggestion.
+  await turnStart($, 'work')
   await world.clock.advance(100_000)
   const first = (await lineOf(ui))?.text
-  expect(await suggestion($, ui)).toMatch(/^The window is 15% in use/)
+  await turnEnd($)
   await stop($, [])
-  // It ends on no minute's stroke, and nothing else is going on: the line is drawn again all the same.
+  expect(await suggestion($, ui)).toMatch(/^The window is 15% in use/)
+  // It is there for as long as nothing runs, and through four minutes of work.
+  await world.clock.advance(600_000)
+  expect((await lineOf(ui))?.label).toBe('For you')
+  await turnStart($, 'work')
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.label).toBe('For you')
   await world.clock.advance(1_000)
   const next = await lineOf(ui)
   expect(next?.label).toBe('Joke')
-  // And it stays its four minutes, though it began a hundred seconds after the clock's own turn would have.
+  // The note after it has its own four minutes, though the suggestion came a hundred seconds into a turn.
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.text).toBe(next?.text)
   await world.clock.advance(1_000)
@@ -1876,7 +1982,8 @@ test('what a suggestion said of the context is shown once the conversation is in
   await compact($)
   await measure($, 'context')
   expect(await lineOf(ui)).toMatchObject({ label: 'For you', color: 'warning', text: 'It shows: after /compact the context went from 172,000 to 171,990 tokens, so every request from here sends 0.006% less.' })
-  // It holds the line its four minutes, and is said once: what is compacted after that is no news.
+  // It holds the line its four minutes of work, and is said once: what is compacted after that is no news.
+  await turnStart($, 'work')
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.text).toMatch(/^It shows/)
   await world.clock.advance(1_000)
@@ -1931,8 +2038,6 @@ test('/clear answers a suggestion about the context too: the line says what the 
   await turnStart($, 'a new task')
   await world.clock.advance(1_000)
   expect((await lineOf(ui))?.text).toMatch(/^It shows: after \/clear/)
-  await turnEnd($)
-  await stop($, [])
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.label).not.toBe('For you')
 })
@@ -1989,14 +2094,15 @@ test('a window that begins again takes its pace with it: nothing is shown of the
   await measureLimits($, world)
   expect(await suggestion($, ui)).toMatch(/^5h limit: 20% left, going at 30% an hour/)
 
-  // The window ends and another begins, hardly used: that is no pace fallen.
+  // The window ends and another begins, hardly used: that is no pace fallen, and the line has nothing
+  // to show for the suggestion, which it still holds.
   const next = new Date(NOW + 6 * 3_600_000).toISOString()
   await world.clock.advance(20 * 60_000)
   world.windows = [{ kind: 'five_hour', percentUsed: 2, resetsAt: next }]
   await measureLimits($, world)
-  expect((await lineOf(ui))?.label).not.toBe('For you')
+  expect((await lineOf(ui))?.text).toMatch(/^5h limit: 20% left, going at 30% an hour/)
   await world.clock.advance(20 * 60_000)
   world.windows = [{ kind: 'five_hour', percentUsed: 3, resetsAt: next }]
   await measureLimits($, world)
-  expect((await lineOf(ui))?.label).not.toBe('For you')
+  expect((await lineOf(ui))?.text).toMatch(/^5h limit: 20% left, going at 30% an hour/)
 })

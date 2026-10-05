@@ -10,8 +10,9 @@
 // acting when it was seen: the main conversation's current prompt, or a subagent (whose spend belongs to
 // the prompt that started it). So the entries always add up to the total, to the cent. What was spent
 // before the ledger first looked is "before tracking": it cannot be itemised, so it is said, not drawn.
-// Where the account has limit windows, the band's cost is what was spent in each of them (the bar is the
-// first one's), and begins again when its window does; the whole session stays in the ledger.
+// Where the account has limit windows, the band's cost is what was spent in each of them and in the
+// plan's month, each beginning again when its own does; the bar is the plan's month. The whole session
+// stays in the ledger.
 //
 // THE LIMIT BARS: what is LEFT of each window the account reports (five hours, the week, a spend limit),
 // draining as it is used: a bar each, with what it says written in the bar. An account billed by the API
@@ -28,7 +29,7 @@
 // Steps are kept by day, so they add up to the week (from Sunday), the month and the year: this session's
 // on the band, every session's on this machine in the ledger.
 //
-// THE LINE: one row under the bars, another every four minutes. By turns it says something about AI (a
+// THE LINE: one row under the bars, another every four minutes of work. By turns it says something about AI (a
 // tip, a fact, what is new), a joke, a piece of good news; and every five to ten prompts, a suggestion
 // drawn from this session's own figures, which says what taking it would move, and says so again when it
 // has moved. What the line says comes with the mod and, unless told otherwise (/penny-patrol lines), from
@@ -143,7 +144,7 @@ type Tip = { id: string; text: string; weight?: number; watch?: { figure: string
 type Watch = { figure: string; was: number; at: number; nth: number; seq: number; usd: number; agents: number }
 
 const COMMAND = 'penny-patrol'
-const USAGE = `/${COMMAND} shows or hides the bars. /${COMMAND} costs prints the ledger, /${COMMAND} audit checks the figures, /${COMMAND} budget <dollars|off> sets the month's budget, /${COMMAND} lines <live|offline|off> says where the line under the bars reads from.`
+const USAGE = `/${COMMAND} shows or hides the bars. /${COMMAND} costs prints the ledger, /${COMMAND} audit checks the figures, /${COMMAND} budget <dollars|off> sets the month's budget, /${COMMAND} plan <day|off> says which day of the month your plan renews on, /${COMMAND} lines <live|offline|off> says where the line under the bars reads from.`
 const FOLDER = '.penny-patrol'
 const MAX_TURNS = 200
 const MIN_BAR = 10
@@ -208,14 +209,18 @@ const LANES = 2
 // Background work that keeps the session running after its turn ended.
 const RUNNING_KINDS = new Set(['shell', 'subagent', 'workflow'])
 const WINDOW_NAME: Record<string, string> = { five_hour: '5h', seven_day: 'Week', spend_limit: 'Spend' }
+// The plan's month among a ledger's marks: no window the account reports has a name like it.
+const PLAN = '@plan'
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-// The line says something else every LINE_MS, and a suggestion holds it that long. A note, the gist of a
+// The line says something else every LINE_STEPS steps of the mascot's (four minutes of work: while nothing
+// runs it stays as it is), and a suggestion holds it that long. A note, the gist of a
 // story (and the least of one worth showing) and a link have their lengths; TOLD_KEPT is how many notes a
 // session remembers having said. The feeds are read again when what they gave is REFRESH_MS old (a read
 // that gave nothing is tried again after RETRY_MS); a session looks whether it is time every
 // FRESHEN_EVERY_TICKS, and first FIRST_READ_MS after it starts. What is kept of a read says in which
 // FORMAT: one kept otherwise is read anew.
-const LINE_MS = 4 * 60_000
+const LINE_STEPS = 240
 const NOTE_MIN = 12
 const NOTE_MAX = 170
 const GIST_MAX = 150
@@ -255,22 +260,28 @@ const CHANGELOG_PAGE = 'https://code.claude.com/docs/en/changelog'
 // reads, and a feed's notes about itself are not news. Changelog entries about the plumbing are left to
 // those who need them.
 const HEATED = /\b(trump|biden|elections?|senat(e|ors?)|congress\w*|democrat\w*|republican\w*|impeach\w*|white house|administration|lawmakers?|politic\w*)\b/i
-const GRIM = /\b(dead|deaths?|dies|died|dying|kill(s|ed|ing|er)?|wars?|shoot(s|ing)?|shot|attack(s|ed)?|suicides?|murder(s|ed)?|abuse[ds]?|rape[ds]?|terror\w*|bomb(s|ed|ing)?|genocide|hostages?|tragedy|tragic|fatal\w*|victims?|crash(es|ed)?|disasters?|lawsuits?|sue[ds]?|quits?|fired|layoffs?|scams?|fraud|broken|sad|risks?|ban(s|ned)?|leak(s|ed)?|breach(es|ed)?|hack(s|ed)?|worst|fail(s|ed|ure)?|wip(e[sd]?|ing) out|doom\w*|extinct\w*|threat\w*|danger\w*|rogue|fear\w*|warn\w*|cris[ei]s|collaps\w*|bubble|backlash|outrage\w*|harm\w*|toxic|addict\w*|surveillance|spy(ing)?|stole|steal(s|ing)?|theft|plagiar\w*|misinformation|deepfakes?|crackdowns?|arrest(s|ed)?|smuggl\w*|antitrust|slammed|harass\w*|resign\w*|slop)\b/i
-const ABOUT_ITSELF = /good news in history|podcast|transcript|newsletter|roundup|webinar|what we.re reading|^gallery|quiz|sponsor|subscribe|sign up|giveaway|horoscope|astrology|crossword|techcrunch disrupt|startup battlefield|register now|save up to/i
+const GRIM = /\b(dead|deaths?|dies|died|dying|kill(s|ed|ing|er)?|wars?|shoot(s|ing)?|shot|attack(s|ed)?|suicides?|murder(s|ed)?|abuse[ds]?|rape[ds]?|terror\w*|bomb(s|ed|ing)?|genocide|hostages?|tragedy|tragic|fatal\w*|victims?|crash(es|ed)?|disasters?|lawsuits?|sue[ds]?|quits?|fired|layoffs?|scams?|fraud|broken|sad|risks?|ban(s|ned)?|leak(s|ed)?|breach(es|ed)?|hack(s|ed)?|worst|fail(s|ed|ure)?|wip(e[sd]?|ing) out|doom\w*|extinct\w*|threat\w*|danger\w*|rogue|fear\w*|warn\w*|cris[ei]s|collaps\w*|bubble|backlash|outrage\w*|harm\w*|toxic|addict\w*|surveillance|spy(ing)?|stole|steal(s|ing)?|theft|plagiar\w*|misinformation|deepfakes?|crackdowns?|arrest(s|ed)?|smuggl\w*|antitrust|slammed|harass\w*|resign\w*|slop|deadly|assault\w*|earthquakes?|tsunamis?|hurricanes?|famine|sliced|severed|amputat\w*)\b/i
+const ABOUT_ITSELF = /good news in history|good news this week|podcast|transcript|newsletter|roundup|webinar|what we.re reading|^gallery|quiz|sponsor|subscribe|sign up|giveaway|horoscope|astrology|crossword|techcrunch disrupt|startup battlefield|register now|save up to/i
 const PLUMBING = /\$\.|plugin|\bmods?\b|opentelemetry|managed setting|environment variable|\bsdk\b|\.mcpb|bedrock|vertex|foundry/i
 // Jokes at the expense of what people are, believe or suffer are not for a line everyone at the desk reads.
 const NOT_FUNNY = /\b(yo mama|your mom|blind|deaf|cripple\w*|wheelchair|retard\w*|autis\w*|god|jesus|christ|atheis\w*|religio\w*|pope|priest|nun|muslim|islam\w*|christian\w*|jew\w*|bible|sex\w*|bra|boobs?|naked|nude|gay|lesbian|suicide|cancer|rape\w*|nazi\w*|hitler|slave\w*|race|racis\w*)\b/i
 const ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '...', mdash: ' - ', ndash: ' - ', rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"' }
 // What cannot stand for its story. A sentence that opens like NOT_A_GIST, or says anything like SELF, is
-// about the page or the outlet; one that opens
+// about the page or the outlet; one that ends like DANGLES points at something it does not say; one that
+// opens
 // like LEANS leans on the headline or (LEANS_LATER, for any but the first) on the sentence before it; one
-// that opens like SCENE only sets a scene, unless there is a figure in it; and one that opens like
-// SUBORDINATE and was cut short by its feed may not have got to its point.
-const NOT_A_GIST = /^(welcome|today,? i|sign up|learn how|register|watch|here are|here's what|subscribe|listen|episode|this week|in this|join us|read more|click|photo|image|credit|tell us|meet the|the full |on equity|we discuss)/i
+// that opens like SCENE only sets a scene, unless there is a figure in it; and one that its feed cut
+// off, when it opens like SUBORDINATE or is shorter than CUT_SHORT, may not have got to its point.
+const NOT_A_GIST = /^(welcome|today,? i|sign up|learn how|register|watch|here are|here's what|subscribe|listen|episode|this week|in this|join us|read more|click|photo|image|credit|tell us|meet the|the full |on equity|we discuss|your weekly|believe it or not)/i
 const SELF = /\b(sponsored by|supported by|our (newsletter|podcast|sponsors?)|sign up (for|to)|subscribe to)\b/i
-const LEANS = /^(this|that|these|those|it|its|it's|they|he|she|such|so much for|here|we|we're|i|our|my)\b/i
-const LEANS_LATER = /^(the|but|and|so|their|his|her|new|one)\b/i
-const SCENE = /^(think about|imagine|picture|there's|there (is|are|was|were)|every |if you|have you|we all|you |let's|once upon|sometimes|for (many|most|years|decades))/i
+const DANGLES = /\b(on|of|for|with|about|to|at) (it|them|this|that)[.]$/i
+const LEANS = /^(this|that|these|those|it|its|it's|they|he|she|such|so much for|here|we|we're|i|our|my|the (trio|pair|duo|group|couple|team|two|three|four))\b/i
+// A later sentence whose first words have an "it" or a "them" in them is about something said before.
+const POINTS_BACK = /^(\S+ ){1,3}(it|them)\b/i
+// A sentence its feed cut off this short has not got anywhere.
+const CUT_SHORT = 100
+const LEANS_LATER = /^(the|but|and|so|their|his|her|new|one|now|instead|then|today|meanwhile|however|still|also|most importantly|little did)\b/i
+const SCENE = /^(think about|imagine|picture|there's|there (is|are|was|were)|every |if you|have you|we all|you |let's|once upon|sometimes|for (many|most|years|decades)|from [^.]{3,60}? comes )/i
 const SUBORDINATE = /^(after|as|when|while|although|though|since|just after|before|during|following|despite|because)\b/i
 // A stop after one of these ends no sentence.
 const ABBREVIATED = /^(?:[A-Za-z]|Mr|Mrs|Ms|Dr|Prof|Sen|Rep|Gov|Lt|Gen|Col|Sgt|St|Jr|Sr|vs|etc|Inc|Corp|Co|Ltd|No|U[.]S|U[.]K|E[.]U|a[.]m|p[.]m|e[.]g|i[.]e)$/
@@ -281,9 +292,15 @@ const FEEDS: Feed[] = [
   { url: () => 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', most: 8, read: body => stories('ai', 'theverge.com', true, body) },
   { url: pick => `https://icanhazdadjoke.com/search?limit=30&page=${1 + Math.floor(pick() * 20)}`, headers: { Accept: 'application/json' }, most: 30, read: dadJokes },
   { url: () => 'https://v2.jokeapi.dev/joke/Programming?safe-mode&amount=10', most: 10, read: codeJokes },
+  // Good news is anything that does some good, big or small: the outlets' front pages, and the sections
+  // where people, animals and children have theirs.
   { url: () => 'https://www.positive.news/feed/', most: 10, read: body => stories('news', 'positive.news', false, body) },
   { url: () => 'https://www.goodnewsnetwork.org/feed/', most: 16, read: body => stories('news', 'goodnewsnetwork.org', true, body) },
+  { url: () => 'https://www.goodnewsnetwork.org/category/news/heroes/feed/', most: 8, read: body => stories('news', 'goodnewsnetwork.org', true, body) },
+  { url: () => 'https://www.goodnewsnetwork.org/category/news/animals/feed/', most: 8, read: body => stories('news', 'goodnewsnetwork.org', true, body) },
+  { url: () => 'https://www.goodnewsnetwork.org/category/news/inspiring/feed/', most: 8, read: body => stories('news', 'goodnewsnetwork.org', true, body) },
   { url: () => 'https://www.optimistdaily.com/feed/', most: 8, read: body => stories('news', 'optimistdaily.com', true, body) },
+  { url: () => 'https://www.goodgoodgood.co/articles/rss.xml', most: 12, read: body => stories('news', 'goodgoodgood.co', false, body) },
 ]
 // What comes with the mod. The commands and keys named here were checked against Claude Code 2.1.289.
 const AI_NOTES = [
@@ -397,6 +414,9 @@ let days: Days = {}
 const others = new Map<string, { mtimeMs: number; days: Days }>()
 let limits: Limits | null = null
 let budget: number | null = null
+// The day of the month the plan renews on, once told (the machine's, in settings.json): until then the
+// plan's month is the calendar's.
+let planDay: number | null = null
 // The time as last read from the host, moved on by the tick between reads.
 let nowMs = 0
 // What makes the mascot walk, and how many steps it has taken since this loaded.
@@ -408,8 +428,8 @@ let unsavedSteps = 0
 // The line: where it reads from and whether its feeds have been owned up to (both the machine's, in
 // settings.json), what the feeds last gave and when they were last asked. `deck` is what this session has
 // to say, kind by kind, in its own order; `told`, what it has said; `shown`, what it says this turn. A
-// turn is LINE_MS long, counted from `lineFrom`; a pinned note holds the line until the time `until`.
-// `lineShown` is what the line was saying at the last tick, to draw it again when that changes.
+// turn is LINE_STEPS of the mascot's steps long, counted from the step `lineFrom`; a pinned note holds
+// the line until the step `until`.
 let lineMode: LineMode = 'live'
 let isIntroduced = false
 let fresh: Fresh | null = null
@@ -418,7 +438,6 @@ let deck: Record<Pile, Note[]> = { ai: [], joke: [], news: [] }
 let told: string[] = []
 let shown: { turn: number; note: Note } | null = null
 let lineFrom = 0
-let lineShown = ''
 let pinned: { note: Note; until: number } | null = null
 // The suggestions: this session's own dice, its prompts as they see them (newest last), when the last
 // turn ended, and the prompt the next suggestion is due at. `said` are the ones made since all there was
@@ -443,8 +462,8 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND,
-      description: 'Show or hide the context, cost and limit bars; costs, audit, budget and lines do more',
-      argumentHint: '[costs | audit | budget <dollars|off> | lines <live|offline|off>]',
+      description: 'Show or hide the context, cost and limit bars; costs, audit, budget, plan and lines do more',
+      argumentHint: '[costs | audit | budget <dollars|off> | plan <day|off> | lines <live|offline|off>]',
       immediate: true,
     })
     nowMs = await $.clock.now()
@@ -642,6 +661,29 @@ export const register: Register = on => {
       return { text: budget === null ? 'Budget cleared.' : `Budget set: ${dollars(budget)} a month, counted from what this machine's sessions spend.` }
     }
 
+    if (verb === 'plan') {
+      const day = Number(value)
+
+      if (value !== '' && value !== 'off' && !(Number.isInteger(day) && day >= 1 && day <= 31)) {
+        return { text: `Say the day of the month your plan renews on, 1 to 31: /${COMMAND} plan 14. /${COMMAND} plan off counts from the 1st.` }
+      }
+
+      if (value !== '') {
+        planDay = value === 'off' ? null : day
+        await settle($)
+        markWindows()
+        await save($)
+        $.ui.invalidate('ui.render')
+      }
+
+      const { from, to } = planOf(nowMs)
+      const month = `Its month now running began on ${dayMonth(from)} and ends on ${dayMonth(to)}.`
+
+      return { text: planDay === null
+        ? `The plan's month is counted from the 1st: the day your plan renews on is not set. ${month} Set it with /${COMMAND} plan 14.`
+        : `Your plan renews on the ${ordinal(planDay)}. ${month} /${COMMAND} plan off counts from the 1st.` }
+    }
+
     if (verb === 'lines') {
       if (value === 'live' || value === 'offline' || value === 'off') {
         lineMode = value
@@ -701,19 +743,6 @@ function tick($: EngineInterface): void {
 
   if (ticks % FRESHEN_EVERY_TICKS === 0) {
     void freshen($).catch(() => undefined)
-  }
-
-  // The line is drawn again when its four minutes are up, or a suggestion's. (What it says at the first
-  // tick is what it was drawn saying.)
-  const saying = pinned !== null && nowMs < pinned.until ? `held ${pinned.until}` : `turn ${turnOf()}`
-
-  if (saying !== lineShown) {
-    const isChanged = lineShown !== ''
-    lineShown = saying
-
-    if (isChanged && !isHidden && lineMode !== 'off') {
-      $.ui.invalidate('ui.render')
-    }
   }
 
   if (!isMainWorking && background === 0) {
@@ -816,8 +845,7 @@ async function book($: EngineInterface, agentId: string | null): Promise<void> {
     pinned = pinned !== null && pinned.note.text.startsWith(SHOWN) ? pinned : null
     told = []
     shown = null
-    lineFrom = nowMs
-    lineShown = ''
+    lineFrom = strides
     coachAt = COACH_LEAST + Math.floor(chance() * COACH_SPREAD)
     shuffle()
   }
@@ -918,8 +946,11 @@ async function catchUp($: EngineInterface, isScan: boolean): Promise<void> {
   let isChanged = false
 
   if (isScan) {
-    const settings = (await load($, 'settings.json')) as { budget?: unknown; lines?: unknown; isIntroduced?: unknown } | undefined
+    const settings = (await load($, 'settings.json')) as { budget?: unknown; lines?: unknown; isIntroduced?: unknown; plan?: unknown } | undefined
     budget = typeof settings?.budget === 'number' && settings.budget > 0 ? settings.budget : null
+    const day = typeof settings?.plan === 'number' && Number.isInteger(settings.plan) && settings.plan >= 1 && settings.plan <= 31 ? settings.plan : null
+    isChanged = day !== planDay
+    planDay = day
     isIntroduced = isIntroduced || settings?.isIntroduced === true
     const mode = settings?.lines === 'offline' || settings?.lines === 'off' ? settings.lines : 'live'
 
@@ -955,7 +986,7 @@ async function catchUp($: EngineInterface, isScan: boolean): Promise<void> {
 
 // What the machine's sessions share of their choices: the budget and where the line reads from.
 async function settle($: EngineInterface): Promise<void> {
-  await keep($, 'settings.json', { budget, lines: lineMode, isIntroduced })
+  await keep($, 'settings.json', { budget, lines: lineMode, isIntroduced, ...(planDay === null ? {} : { plan: planDay }) })
 }
 
 // What the feeds gave, as a session last kept it: taken when it is newer than what is known.
@@ -1005,7 +1036,9 @@ async function freshen($: EngineInterface): Promise<void> {
     return
   }
 
-  fresh = { at: nowMs, notes }
+  // A story two feeds gave is one story.
+  const unique = notes.filter((note, i) => notes.findIndex(other => other.text === note.text) === i)
+  fresh = { at: nowMs, notes: unique }
   await keep($, 'lines.json', { format: FORMAT, ...fresh })
   shuffle()
   $.ui.invalidate('ui.render')
@@ -1057,7 +1090,7 @@ function spentOf(money: Ledger): { main: number; agents: number } {
 // Marks, for each window of the plan, where this session's spending stood when it met the window as it
 // now is: one it has not seen before, one that has begun again (it ends later than it did or, where no
 // end is told, less of it is used), and one whose end has passed, which begins again there and then,
-// before the next is reported. True when a mark was set.
+// before the next is reported. With them, the plan's own month (see planMark). True when a mark was set.
 function markWindows(): boolean {
   if (ledger === null || limits === null) {
     return false
@@ -1082,18 +1115,76 @@ function markWindows(): boolean {
     isMarked = isMarked || isRenewed
   }
 
+  if (limits.windows.length > 0) {
+    const { from, to } = planOf(nowMs)
+    const ends = to.toISOString()
+    const mark = marks[PLAN]
+
+    // A month first met, one that has run out and begun again, and one that changed because another day
+    // was said: each is worked out from the session's days, which a month begins and ends with.
+    if (mark === undefined || mark.resetsAt !== ends) {
+      marks[PLAN] = planMark(ledger, from, ends)
+      isMarked = true
+    }
+  }
+
   ledger.marks = marks
 
   return isMarked
 }
 
-// What the session was seen spending in each window of the plan it has a mark for, in whole cents: in
-// all, and by the main conversation and by its subagents, which add up to it.
-function periodsOf(money: Ledger): Array<{ name: string; total: number; main: number; agents: number }> {
-  const spent = spentOf(money)
+// The plan's month now running: from the day of the month the plan renews on, at midnight, to that day
+// of the next month. A day the month does not have is its last. With no day told, the calendar's month.
+function planOf(at: number): { from: Date; to: Date } {
+  const day = planDay ?? 1
+  const now = new Date(at)
+  const on = (monthsOn: number): Date => {
+    const first = new Date(now.getFullYear(), now.getMonth() + monthsOn, 1)
 
-  return (limits?.windows ?? []).flatMap(window => {
-    const mark = money.marks?.[window.kind]
+    return new Date(first.getFullYear(), first.getMonth(), Math.min(day, new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()))
+  }
+
+  return on(0).getTime() <= at ? { from: on(0), to: on(1) } : { from: on(-1), to: on(0) }
+}
+
+// Where this session's spending stood when the plan's month began, worked out from its days, which are
+// whole days as the month's are: all it was seen spending is the month's when its first day is in it;
+// else what its days since then add up to, split between the main conversation and its subagents as
+// all of it is (which of the two spent it before the month began is not kept).
+function planMark(money: Ledger, from: Date, ends: string): Mark {
+  const start = dateOf(from)
+  const spent = spentOf(money)
+  const tracked = spent.main + spent.agents
+  const dates = Object.keys(days).filter(date => (days[date]?.usd ?? 0) > 0)
+  const since = dates.every(date => date >= start)
+    ? tracked
+    : Math.min(tracked, dates.filter(date => date >= start).reduce((sum, date) => sum + (days[date]?.usd ?? 0), 0))
+  const earlier = tracked > 0 ? (tracked - since) / tracked : 0
+
+  return { resetsAt: ends, used: 0, usd: money.seen - since, main: spent.main * earlier, agents: spent.agents * earlier }
+}
+
+// 14 -> "14th".
+function ordinal(n: number): string {
+  const unit = n % 10
+
+  return `${n}${n >= 11 && n <= 13 ? 'th' : unit === 1 ? 'st' : unit === 2 ? 'nd' : unit === 3 ? 'rd' : 'th'}`
+}
+
+// A day as the ledger says it: "5 Oct".
+function dayMonth(date: Date): string {
+  return `${date.getDate()} ${MONTHS[date.getMonth()] ?? ''}`
+}
+
+// What the session was seen spending in each window of the plan it has a mark for, and last in the
+// plan's month, in whole cents: in all, and by the main conversation and by its subagents, which add up
+// to it.
+function periodsOf(money: Ledger): Array<{ name: string; total: number; main: number; agents: number; isPlan: boolean }> {
+  const spent = spentOf(money)
+  const kinds = [...(limits?.windows ?? []).map(window => window.kind), ...((limits?.windows.length ?? 0) > 0 ? [PLAN] : [])]
+
+  return kinds.flatMap(kind => {
+    const mark = money.marks?.[kind]
 
     if (!mark) {
       return []
@@ -1102,7 +1193,7 @@ function periodsOf(money: Ledger): Array<{ name: string; total: number; main: nu
     const total = Math.max(0, Math.round((money.seen - mark.usd) * 100))
     const [main = 0, agents = 0] = apportion([Math.max(0, spent.main - mark.main), Math.max(0, spent.agents - mark.agents)], total, 0)
 
-    return [{ name: WINDOW_NAME[window.kind] ?? capital(window.kind.replace(/_/g, ' ')), total, main, agents }]
+    return [{ name: kind === PLAN ? 'Plan' : WINDOW_NAME[kind] ?? capital(kind.replace(/_/g, ' ')), total, main, agents, isPlan: kind === PLAN }]
   })
 }
 
@@ -1194,11 +1285,14 @@ function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, m
   const isTight = free < (now.used + free) * TIGHT_SHARE
   const context = now.segments.filter(segment => segment.kind !== 'buffer').map(segment => ({ ...partOf(segment), isTight }))
   const contextFacts = [`${now.percent}%`, `${short(now.used)} / ${short(now.window)}`, free > 0 ? `${short(free)} free` : '']
-  // With the plan's windows known, the cost is what was spent in each of them and begins again when its
-  // window does; the bar is the first one's. The whole session is the ledger's to say.
+  // With the plan's windows known, the cost is what was spent in each of them and in the plan's month,
+  // each beginning again when its own does; the bar is the month's. The whole session is the ledger's
+  // to say.
   const periods = money ? periodsOf(money) : []
-  const period = periods[0]
-  const spend = bill ? spendParts(period ? { ...bill, main: period.main, agents: period.agents, folded: 0 } : bill) : []
+  const period = periods.find(each => each.isPlan) ?? periods[0]
+  const split = bill ? spendParts(period ? { main: period.main, agents: period.agents, folded: 0 } : bill) : []
+  // A part that spent nothing has no cell of the bar, but its entry under it.
+  const spend = split.filter(part => part.weight > 0)
   const costFacts = money && bill
     ? [...(period ? periods.map(each => `${each.name} ${money$(each.total)}`) : [money$(bill.total)]), promptOf(money, bill)]
     : []
@@ -1235,7 +1329,7 @@ function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, m
           cells: cellsOf(spend, track),
           beside: lineOf('Cost', costFacts, width, false),
           above: [],
-          below: rows => legendOf(spend.map(part => chipOf(part, money$(part.weight))), before, width, rows).map(runs => ({ label: '', runs })),
+          below: rows => legendOf(split.map(part => chipOf(part, money$(part.weight))), before, width, rows).map(runs => ({ label: '', runs })),
           smiles: COST_SMILES,
         }]
       : []
@@ -1459,7 +1553,7 @@ function cut(text: string, most: number): string {
 // AI, a joke, good news, by turns) that fits a line of `inner` cells and has not been said. A kind all
 // said starts again; one with nothing that fits gives its turn to the next.
 function noteAt(inner: number): Note | null {
-  if (pinned !== null && nowMs < pinned.until) {
+  if (pinned !== null && strides < pinned.until) {
     return pinned.note
   }
 
@@ -1489,16 +1583,16 @@ function noteAt(inner: number): Note | null {
   return null
 }
 
-// Which turn of the line it is: another every LINE_MS.
+// Which turn of the line it is: another every LINE_STEPS steps, so only while something runs.
 function turnOf(): number {
-  return Math.max(0, Math.floor((nowMs - lineFrom) / LINE_MS))
+  return Math.max(0, Math.floor((strides - lineFrom) / LINE_STEPS))
 }
 
 // A note that holds the line for a turn of its own: the turns after it begin when it ends.
 function hold(note: Note): void {
   const turn = turnOf()
-  pinned = { note, until: nowMs + LINE_MS }
-  lineFrom = pinned.until - (turn + 1) * LINE_MS
+  pinned = { note, until: strides + LINE_STEPS }
+  lineFrom = pinned.until - (turn + 1) * LINE_STEPS
 }
 
 // What this session has to say, kind by kind: what the feeds gave and what came with the mod, each
@@ -1540,12 +1634,12 @@ function shuffle(): void {
 
 // What `/penny-patrol lines` answers: where the line reads from now, and how to have it otherwise.
 function linesSaid(isUnknown: boolean): string {
-  const feeds = FEEDS.map(feed => /^https:\/\/([^/]+)/.exec(feed.url(() => 0))?.[1] ?? '').join(', ')
+  const feeds = [...new Set(FEEDS.map(feed => /^https:\/\/([^/]+)/.exec(feed.url(() => 0))?.[1] ?? ''))].join(', ')
   const now = lineMode === 'off'
     ? 'The line under the bars is off.'
     : lineMode === 'offline'
       ? 'The line under the bars says only what came with the mod; nothing is read from the web.'
-      : `The line under the bars is live: what came with the mod, and ${fresh === null ? 'nothing read from the feeds yet' : `${count(fresh.notes.length)} notes read from the feeds ${span(Math.max(0, nowMs - fresh.at) / 1000)} ago`}. It says something else every ${LINE_MS / 60_000} minutes; the feeds are read again every ${REFRESH_MS / 60_000}.`
+      : `The line under the bars is live: what came with the mod, and ${fresh === null ? 'nothing read from the feeds yet' : `${count(fresh.notes.length)} notes read from the feeds ${span(Math.max(0, nowMs - fresh.at) / 1000)} ago`}. It says something else every ${LINE_STEPS / 60} minutes of work; the feeds are read again every ${REFRESH_MS / 60_000} minutes.`
 
   return [
     ...(isUnknown ? ['Say live, offline or off.'] : []),
@@ -1989,10 +2083,14 @@ function jokeOf(raw: string): Note[] {
 // headline, and its link, the short one a feed gives for a post where it does. `isLead` says the summary
 // is the story's opening lines, not a summary written as one.
 function stories(topic: Pile, host: string, isLead: boolean, body: string): Note[] {
+  // Of the opening lines of a story about AI, the sentence must name someone or a figure: an essay opens
+  // with neither. Good news is told big or small, named or not.
+  const mustName = isLead && topic === 'ai'
+
   return [...body.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/g)].flatMap((found): Note[] => {
     const item = found[0]
     const title = plainOf(/<title\b[^>]*>([\s\S]*?)<\/title>/.exec(item)?.[1] ?? '')
-    const text = gistOf(/<(description|summary)\b[^>]*>([\s\S]*?)<\/\1>/.exec(item)?.[2] ?? '', title, isLead)
+    const text = gistOf(/<(description|summary)\b[^>]*>([\s\S]*?)<\/\1>/.exec(item)?.[2] ?? '', title, isLead, mustName)
     const href = [
       /<(guid|id)\b[^>]*>\s*(https:\/\/[^\s<]+\/\?p=\d+)\s*<\/\1>/.exec(item)?.[2],
       /<link>\s*(https:\/\/[^\s<]+)\s*<\/link>/.exec(item)?.[1],
@@ -2016,9 +2114,10 @@ function isOf(link: string, host: string): boolean {
 
 // The gist of a story, from the summary its feed gives of it. Of a summary written as one: as many of
 // its sentences, from the first, as fit and are about the story. Of a story's opening lines: the first
-// sentence that names someone, somewhere or a figure. Either is cut short when it is too long (see cut).
+// sentence that stands by itself (and, where `mustName`, names someone, somewhere or a figure). Either
+// is cut short when it is too long (see cut).
 // Null with nothing that can stand for the story: a headline is no gist.
-function gistOf(summary: string, title: string, isLead: boolean): string | null {
+function gistOf(summary: string, title: string, isLead: boolean, mustName: boolean): string | null {
   const plain = plainOf(summary)
     .replace(/\s*The (post|article) .{0,300}? (appeared first|first appeared) on .{0,80}$/, '')
     .replace(/^BY THE [A-Z ]+ TEAM\s*/, '')
@@ -2031,18 +2130,19 @@ function gistOf(summary: string, title: string, isLead: boolean): string | null 
     || sentence.endsWith('?')
     || NOT_A_GIST.test(sentence)
     || SELF.test(sentence)
+    || DANGLES.test(sentence)
     || bare(sentence) === bare(title)
     || LEANS.test(sentence)
-    || (nth > 0 && LEANS_LATER.test(sentence))
+    || (nth > 0 && (LEANS_LATER.test(sentence) || POINTS_BACK.test(sentence)))
     || (SCENE.test(sentence) && !/\d/.test(sentence))
-    || (sentence.endsWith('...') && SUBORDINATE.test(sentence))
+    || (sentence.endsWith('...') && (SUBORDINATE.test(sentence) || sentence.length < CUT_SHORT))
   // A figure, a capital after the first word, or a first word that is a name by its looks.
   const isNamed = (shown: string): boolean => /\d/.test(shown) || /[\s"'(-](?!I\b)[A-Z][A-Za-z]/.test(shown) || /^[A-Z][a-z]*[A-Z]|^[A-Z][A-Za-z]+'s\b/.test(shown)
   const first = sentences[0]
   let picked: string | undefined
 
   if (isLead) {
-    picked = sentences.slice(0, 3).find((sentence, nth) => !isDull(sentence, nth) && isNamed(cut(sentence, GIST_MAX)))
+    picked = sentences.slice(0, 3).find((sentence, nth) => !isDull(sentence, nth) && (!mustName || isNamed(cut(sentence, GIST_MAX))))
   } else if (first !== undefined && !isDull(first, 0)) {
     picked = first
 
@@ -2429,13 +2529,15 @@ function billOf(money: Ledger): Bill {
   return { total, before, folded, main, agents: total - before - folded - main, rows }
 }
 
-// Who spent what the ledger saw being spent. (The mascot's colour is left to the mascot.)
-function spendParts(bill: Bill): Part[] {
+// Who spent what the ledger saw being spent: the main conversation and its subagents, both always, so
+// that neither is missed for having spent nothing; and the earlier prompts, where there are any. (The
+// mascot's colour is left to the mascot.)
+function spendParts(bill: Pick<Bill, 'main' | 'agents' | 'folded'>): Part[] {
   return [
     { name: 'Main', weight: bill.main, glyph: '█', color: 'permission', isDim: false },
     { name: 'Subagents', weight: bill.agents, glyph: '█', color: 'cyan_FOR_SUBAGENTS_ONLY', isDim: false },
-    { name: 'Earlier prompts', weight: bill.folded, glyph: '▒', color: 'inactive', isDim: false },
-  ].filter(part => part.weight > 0)
+    ...(bill.folded > 0 ? [{ name: 'Earlier prompts', weight: bill.folded, glyph: '▒', color: 'inactive', isDim: false }] : []),
+  ]
 }
 
 // The ledger as text: the session's total reconciled to the cent, then every prompt and what it used.
@@ -2459,7 +2561,9 @@ function statement(money: Ledger): string {
 
   return [
     `Session total reported by Claude Code: ${money$(bill.total)}`,
-    ...periodsOf(money).map(period => `  ${`This ${period.name} window:`.padEnd(18)}${money$(period.total)}  (seen spent since it began, or since this session first met it: the band's cost)`),
+    ...periodsOf(money).map(period => period.isPlan
+      ? `  ${'This plan month:'.padEnd(18)}${money$(period.total)}  (seen spent since ${dayMonth(planOf(nowMs).from)}: the band's cost bar. /${COMMAND} plan <day> says which day your plan renews on)`
+      : `  ${`This ${period.name} window:`.padEnd(18)}${money$(period.total)}  (seen spent since it began, or since this session first met it)`),
     `  Itemised below:   ${money$(itemised)}`,
     ...(money.folded.prompts > 0 ? [`  Earlier prompts:  ${money$(bill.folded)}  (${count(money.folded.prompts)} prompts older than the ${MAX_TURNS} kept line by line)`] : []),
     `  Before tracking:  ${money$(bill.before)}  (spent before this ledger first looked; cannot be itemised)`,
