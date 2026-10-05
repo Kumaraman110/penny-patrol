@@ -1,23 +1,24 @@
-// Penny Patrol: three meters above the prompt, each paced by a small walker while the session works.
+// Penny Patrol: three meters above the prompt, and a mascot that walks them while the session works.
 //
 // THE CONTEXT BAR: the window as a stacked bar, one colour per category as /context breaks it down. What
 // is in use comes first, then the free space, then the autocompact buffer at the window's end, so the
 // free run is the room left before compaction.
 //
-// THE COST BAR: where this session's dollars went. Claude Code reports ONE figure, the session's total.
+// THE COST BAR: who spent this session's dollars. Claude Code reports ONE figure, the session's total.
 // The ledger looks at it at every turn start, tool call and turn end, and books each rise to whoever was
 // acting when it was seen: the main conversation's current prompt, or a subagent (whose spend belongs to
 // the prompt that started it). So the entries always add up to the total, to the cent. What was spent
-// before the ledger first looked is "before tracking": it cannot be itemised afterwards.
+// before the ledger first looked is "before tracking": it cannot be itemised, so it is said, not drawn.
 //
 // THE LIMIT BARS: what is LEFT of each window the account reports (five hours, the week, a spend limit),
-// draining as it is used, with the time to its reset beside it. An account billed by the API has no such
-// window; it gets the month's spend instead, draining a budget when one is set and growing when not.
+// draining as it is used. An account billed by the API has no such window; it gets the month's spend
+// instead, draining a budget when one is set and growing when not.
 //
-// THE WALKERS: while anything runs (a turn, or a background shell or subagent) a walker paces every bar,
-// one step a second, neighbours in opposite directions; when nothing runs they step off, and the bars
-// are bare. Steps are kept by day, so they add up to the week (from Sunday), the month and the year,
-// across every session on this machine.
+// THE SCENE AND THE READOUT: the bars stand at the left, two free rows over each; every word is at the
+// right, a line a row. The free rows are the mascot's: it stands on a bar, and while anything runs (a
+// turn, or a background shell or subagent) it takes a step a second, along the first bar, down, back
+// along the second, down, along the third, and then the whole way back. Steps are kept by day, so they
+// add up to the week (from Sunday), the month and the year, across every session on this machine.
 //
 // WHAT IS WHOSE: a session's ledger, days and choices are its own (sessions/, days/ under the folder
 // below, one file a session, written by that session alone). The limits and the budget are the
@@ -71,9 +72,18 @@ type Bill = {
   agents: number
   rows: Array<{ turn: Turn; amount: number; ids: string[]; shares: number[] }>
 }
-type Cell = { glyph: string; color: string; isDim: boolean; isInverse: boolean }
+type Cell = { glyph: string; color: string | undefined; isDim: boolean }
 type Part = { name: string; weight: number; glyph: string; color: string; isDim: boolean }
+// A limit bar, and what is said of it: at length, or `short` where that does not fit.
 type Gauge = { name: string; parts: Part[]; label: string; short: string }
+// A piece of text drawn one way, and a line of the readout: its label, then what it says.
+type Run = { text: string; color?: string; isDim?: boolean }
+type Line = { label: string; runs: Run[] }
+// A legend's entry: a part's swatch and what is said of it. The lightest give way first.
+type Chip = { glyph: string; color: string | undefined; isDim: boolean; text: string; weight: number }
+// A bar of the scene with its lines: the one beside it, those that must stand in the rows right above
+// it, and what it has to say in the `rows` rows under it.
+type Section = { cells: Cell[]; beside: Line; above: Line[]; below: (rows: number) => Line[] }
 type Box = ElementConstructor<BoxProps>
 type Text = ElementConstructor<TextProps>
 
@@ -88,14 +98,33 @@ const SAVE_EVERY_STEPS = 15
 const SHARE_EVERY_TICKS = 5
 const SCAN_EVERY_TICKS = 30
 const RATE_AFTER_STEPS = 60
+// A redraw a minute keeps the countdowns moving while nothing else does.
+const REDRAW_EVERY_TICKS = 60
 // Single-width block characters: they line up in every terminal font.
 const GLYPH: Record<Kind, string> = { used: '█', free: '░', buffer: '▒' }
 const ORDER: Kind[] = ['used', 'free', 'buffer']
-// The walker, eight cells: an arm, the body with two eyes, an arm. Arms low, then high, as it steps.
-const WALKER_COLOR = 'claude'
-const ARMS: Array<[string, string]> = [['▗', '▖'], ['▝', '▘']]
-const BODY = ['█', '▪', '█', '█', '▪', '█']
-const WALKER_CELLS = BODY.length + 2
+const EMPTY: Cell = { glyph: '░', color: 'inactive', isDim: true }
+// The scene takes this share of the band, the readout the rest (to TEXT_MAX cells), GAP between them.
+// A line of the readout is a label of LABEL cells, then what it says.
+const TRACK_SHARE = 0.4
+const TEXT_MAX = 136
+const GAP = 2
+const LABEL = 9
+// The least inner width the scene and its readout are drawn in; narrower, the bars alone.
+const FULL_COLUMNS = 58
+// The mascot, six cells by two rows; LANES rows over each bar are kept free for it. Its body is four
+// cells of its colour as BACKGROUND, with what is dark cut out of them by a glyph (the pairs marked
+// true): two eyes in the upper row, the gaps between four legs in the lower. A background fills its cell
+// whatever the terminal's line spacing, so the two rows join; block glyphs alone would leave a seam.
+// Its arms are half blocks at its sides. The inner legs step in and out as it walks.
+const MASCOT_COLOR = 'claude'
+const MASCOT_CELLS = 6
+const HEAD: Array<[string, boolean]> = [['▄', false], ['▪  ▪', true], ['▄', false]]
+const LEGS: Array<Array<[string, boolean]>> = [
+  [[' ', false], ['▗▗▖▖', true], [' ', false]],
+  [[' ', false], ['▗▖▗▖', true], [' ', false]],
+]
+const LANES = 2
 // Background work that keeps the session running after its turn ended.
 const RUNNING_KINDS = new Set(['shell', 'subagent', 'workflow'])
 const WINDOW_NAME: Record<string, string> = { five_hour: '5h', seven_day: 'week', spend_limit: 'spend' }
@@ -118,12 +147,11 @@ let limits: Limits | null = null
 let budget: number | null = null
 // The time as last read from the host, moved on by the tick between reads.
 let nowMs = 0
-// What makes the walkers walk.
+// What makes the mascot walk, and how many steps it has taken since this loaded.
 let isMainWorking = false
 let background = 0
 let ticks = 0
 let strides = 0
-let promptSteps = 0
 let unsavedSteps = 0
 
 export const register: Register = on => {
@@ -175,7 +203,6 @@ export const register: Register = on => {
     isMainWorking = true
     // Its end says what is still running; until then nothing is assumed to be.
     background = 0
-    promptSteps = 0
 
     return next(e)
   })
@@ -317,12 +344,12 @@ export const register: Register = on => {
 
     const { Box, Text } = $.ui.resolve(e)
 
-    return band(Box, Text, reading, e.props.bodyColumns)
+    return band(Box, Text, reading, e.props.bodyColumns, e.props.maxRows)
   })
 }
 
 // Every second: the clock moves, the others' files are looked at now and then, and while anything runs
-// the walkers take a step. Their places follow from the count alone (see placeOf).
+// the mascot takes a step. Its place follows from the count alone (see spotOf).
 function tick($: EngineInterface): void {
   ticks += 1
   nowMs += 1000
@@ -333,11 +360,14 @@ function tick($: EngineInterface): void {
   }
 
   if (!isMainWorking && background === 0) {
+    if (!isHidden && ticks % REDRAW_EVERY_TICKS === 0) {
+      $.ui.invalidate('ui.render')
+    }
+
     return
   }
 
   strides += 1
-  promptSteps += 1
   unsavedSteps += 1
   dayOf(nowMs).steps += 1
 
@@ -610,142 +640,345 @@ function calendar(at: number): Record<'today' | 'week' | 'month' | 'year', Day> 
   return sums
 }
 
-function band(Box: Box, Text: Text, now: Reading, columns: number): RenderElement {
-  // paddingX takes two cells. A label gives way before its bar does, last part first; then both labels
-  // take the wider one's width, so the two bars are one length and their walkers one track.
+function band(Box: Box, Text: Text, now: Reading, columns: number, maxRows: number): RenderElement {
+  // paddingX takes two cells.
   const inner = Math.max(1, columns - 2)
   const money = ledger !== null && ledger.seen > 0 ? ledger : null
-  const last = money?.turns.at(-1)
-  const contextLabel = fit(
-    [`${now.percent}%  ${short(now.used)} / ${short(now.window)}`, now.model, effort ?? '', stepsOf(promptSteps)],
-    inner,
-  )
-  const costLabel = money
-    ? fit([dollars(money.seen), last ? `this prompt ${dollars(spendOf(last))}` : '', stepsOf(money.steps)], inner)
-    : ''
-  const labelWidth = Math.max(contextLabel.length, costLabel.length)
-  const width = inner - labelWidth
+  const bill = money ? billOf(money) : null
   const totals = calendar(nowMs)
+  const gauges = gaugesOf(totals.month.usd, money !== null)
   const context = now.segments.map(partOf)
-  const sent = now.last
-    ? [`last request: in ${short(now.last.input_tokens)} · cache read ${short(now.last.cache_read_input_tokens)} · cache write ${short(now.last.cache_creation_input_tokens)} · out ${short(now.last.output_tokens)}`]
-    : []
-  const rows = [
-    Box({ flexDirection: 'row', children: barRuns(Text, context, width, 0, contextLabel.padStart(labelWidth)) }),
-    legendRow(Box, Text, context, now.segments.map(segment => short(segment.tokens)), sent),
-  ]
+  const free = now.segments.reduce((sum, segment) => sum + (segment.kind === 'free' ? segment.tokens : 0), 0)
+  const contextFacts = [`${now.percent}%`, `${short(now.used)} / ${short(now.window)}`, free > 0 ? `${short(free)} free` : '']
+  const spend = bill ? spendParts(bill) : []
+  const costFacts = money && bill ? [money$(bill.total), promptOf(money, bill), ...rateOf(money, bill)] : []
 
-  if (money) {
-    const bill = billOf(money)
-    const spend = spendParts(bill)
-    rows.push(
-      Box({ flexDirection: 'row', children: barRuns(Text, spend, width, 1, costLabel.padStart(labelWidth)) }),
-      legendRow(Box, Text, spend, spend.map(part => money$(part.weight)), rateOf(money, bill)),
-    )
+  if (inner >= FULL_COLUMNS) {
+    const room = Math.min(TEXT_MAX, inner - GAP - Math.floor(inner * TRACK_SHARE))
+    const track = inner - GAP - room
+    // What a line may say after its label.
+    const width = room - LABEL
+    const sections: Section[] = [{
+      cells: cellsOf(context, track),
+      beside: lineOf('context', contextFacts, width, false),
+      above: [],
+      below: rows => {
+        // The free run needs no entry: the line beside the bar says what is free. The buffer's is said
+        // only where there is room for it.
+        const chips = (kind: Kind): Chip[] =>
+          now.segments.filter(segment => segment.kind === kind).map(segment => chipOf(partOf(segment), short(segment.tokens)))
+        const sent = lineOf('', sentOf(now.last), width, true)
+        // A legend that fits on one line leaves the other to the last request.
+        const tight = sent.runs.length > 0 && rows > 1
+          ? wrapped([...chips('used'), ...chips('buffer')], width, rows - 1) ?? wrapped(chips('used'), width, rows - 1)
+          : null
+
+        return tight
+          ? [...tight.map(runs => ({ label: '', runs })), sent]
+          : legendOf(chips('used'), chips('buffer'), width, rows).map(runs => ({ label: '', runs }))
+      },
+    }]
+
+    if (money && bill) {
+      const before: Chip[] = bill.before > 0
+        ? [{ glyph: '', color: undefined, isDim: true, text: `before tracking ${money$(bill.before)}`, weight: bill.before }]
+        : []
+      sections.push({
+        cells: cellsOf(spend, track),
+        beside: lineOf('cost', costFacts, width, false),
+        above: [],
+        below: rows => legendOf(spend.map(part => chipOf(part, money$(part.weight))), before, width, rows).map(runs => ({ label: '', runs })),
+      })
+    }
+
+    if (gauges.length > 0) {
+      // Two gauges have a line each: the first right above the bars, the second beside them. One alone
+      // is beside its bar; from the third on they share the second's line.
+      const first = gauges.length > 1 ? gauges[0] : undefined
+      const rest = first ? gauges.slice(1) : gauges
+      const beside: Line = { label: rest[0]?.name ?? '', runs: [] }
+      let taken = 0
+
+      for (const gauge of rest) {
+        const lead = beside.runs.length === 0 ? '' : `   ${gauge.name} `
+        const text = [gauge.label, gauge.short].find(candidate => taken + lead.length + candidate.length <= width)
+
+        if (text === undefined) {
+          break
+        }
+
+        beside.runs.push(...(lead === '' ? [] : [{ text: lead, isDim: true }]), { text })
+        taken += lead.length + text.length
+      }
+
+      sections.push({
+        cells: stripOf(gauges, track),
+        beside,
+        above: first ? [{ label: first.name, runs: [{ text: [first.label, first.short].find(candidate => candidate.length <= width) ?? '' }] }] : [],
+        below: () => [],
+      })
+    }
+
+    const header = [
+      lineOf('model', [now.model, effort === null ? '' : `${effort} effort`], width, true),
+      lineOf('steps', periodsOf(totals), width, true),
+    ]
+    const rows = scene(Box, Text, sections, header, track)
+
+    if (rows.length <= maxRows) {
+      return Box({ flexDirection: 'column', paddingX: 1, children: rows })
+    }
   }
 
-  const gauges = gaugesOf(totals.month.usd, money !== null)
+  const bars = [{ parts: context, facts: contextFacts }, ...(money ? [{ parts: spend, facts: costFacts }] : [])]
+
+  return Box({ flexDirection: 'column', paddingX: 1, children: compact(Box, Text, inner, bars, gauges) })
+}
+
+// The scene and its readout, row by row: over each bar its two free rows, the mascot in them when it is
+// on that bar; at the right of every row, a line. The lines beside the free rows are what the bar above
+// still has to say (the model and the steps, over the first), then what must stand right above this one.
+function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track: number): RenderElement[] {
+  const span = track - MASCOT_CELLS
+  const spot = spotOf(strides, sections.length, span)
+  const mascot = [HEAD, LEGS[isMainWorking || background > 0 ? strides % 2 : 0] ?? []]
+  const blank = (cells: number): RenderElement[] => (cells > 0 ? [Text({ children: ' '.repeat(cells) })] : [])
+  const rows: RenderElement[] = []
+  let waiting = header
+
+  sections.forEach((section, i) => {
+    const open = LANES - section.above.length
+    const lines = [...Array.from({ length: open }, (_, slot) => waiting[slot]), ...section.above]
+
+    lines.forEach((line, lane) => {
+      const left = spot.bar === i
+        ? [
+            ...blank(spot.at),
+            ...(mascot[lane] ?? []).map(([children, isCut]) => Text({ color: MASCOT_COLOR, inverse: isCut, children })),
+            ...blank(span - spot.at + GAP),
+          ]
+        : blank(track + GAP)
+      rows.push(Box({ flexDirection: 'row', children: [...left, ...(line ? written(Text, line) : [])] }))
+    })
+
+    rows.push(Box({ flexDirection: 'row', children: [...runsOf(Text, section.cells), ...blank(GAP), ...written(Text, section.beside)] }))
+    const next = sections[i + 1]
+    waiting = section.below(next ? LANES - next.above.length : LANES)
+  })
+
+  // What the last bar has to say goes under it.
+  for (const line of waiting) {
+    rows.push(Box({ flexDirection: 'row', children: [...blank(track + GAP), ...written(Text, line)] }))
+  }
+
+  return rows
+}
+
+// Too little room for the scene: the bars alone, each with its figures, and no mascot. A label gives way
+// before its bar does, last part first; then the labels take the widest one's width, so the bars are one
+// length. The limit bars share a row: each a name, its bar and what is left.
+function compact(Box: Box, Text: Text, inner: number, bars: Array<{ parts: Part[]; facts: string[] }>, gauges: Gauge[]): RenderElement[] {
+  const aside = (text: string): string => (text === '' ? '' : `${' '.repeat(GAP)}${text}`)
+  const labels = bars.map(bar => aside(fit(bar.facts, inner - MIN_BAR - GAP)))
+  const labelWidth = Math.max(0, ...labels.map(label => label.length))
+  const rows = bars.map((bar, i) =>
+    Box({
+      flexDirection: 'row',
+      children: [
+        ...runsOf(Text, cellsOf(bar.parts, inner - labelWidth)),
+        ...(labelWidth > 0 ? [Text({ dimColor: true, children: (labels[i] ?? '').padStart(labelWidth) })] : []),
+      ],
+    }),
+  )
 
   if (gauges.length > 0) {
-    // The gauges share one row: each a name, its bar and, outside the bar, what is left and its reset.
-    const each = Math.floor((inner - (gauges.length - 1) * 2) / gauges.length)
+    const each = Math.floor((inner - (gauges.length - 1) * GAP) / gauges.length)
     rows.push(Box({
       flexDirection: 'row',
-      columnGap: 2,
-      children: gauges.map((gauge, i) => {
+      columnGap: GAP,
+      children: gauges.map(gauge => {
         const name = `${gauge.name} `
-        const label = [gauge.label, gauge.short].find(text => each - name.length - text.length >= MIN_BAR) ?? ''
+        const label = [gauge.label, gauge.short].map(aside).find(text => each - name.length - text.length >= MIN_BAR) ?? ''
 
         return Box({
           flexDirection: 'row',
           children: [
             Text({ dimColor: true, children: name }),
-            ...barRuns(Text, gauge.parts, Math.max(0, each - name.length - label.length), rows.length / 2 + i, label),
+            ...runsOf(Text, cellsOf(gauge.parts, Math.max(0, each - name.length - label.length))),
+            ...(label === '' ? [] : [Text({ dimColor: true, children: label })]),
           ],
         })
       }),
     }))
   }
 
-  rows.push(Box({
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: 3,
-    children: [
-      Text({ dimColor: true, children: `steps  today ${count(totals.today.steps)} · week ${count(totals.week.steps)} · month ${count(totals.month.steps)} · year ${count(totals.year.steps)}` }),
-      ...(money
-        ? [Text({ dimColor: true, children: `spend  today ${dollars(totals.today.usd)} · week ${dollars(totals.week.usd)} · month ${dollars(totals.month.usd)} · year ${dollars(totals.year.usd)}` })]
-        : []),
-    ],
-  }))
-
-  return Box({ flexDirection: 'column', paddingX: 1, children: rows })
+  return rows
 }
 
-// One bar: its parts as cells, the walker over them while anything runs, and its label. The `nth` bar's
-// walker goes the other way from its neighbour's: when one goes right, the next goes left.
-function barRuns(Text: Text, parts: Part[], width: number, nth: number, label: string): RenderElement[] {
+// A bar's parts as cells, by share, each part keeping a cell while there is room. With nothing to show
+// yet the bar is empty, not missing.
+function cellsOf(parts: Part[], width: number): Cell[] {
   const counts = apportion(parts.map(part => part.weight), width, 1)
   const cells = parts.flatMap((part, i) =>
-    Array.from({ length: counts[i] ?? 0 }, (): Cell => ({ glyph: part.glyph, color: part.color, isDim: part.isDim, isInverse: false })),
+    Array.from({ length: counts[i] ?? 0 }, (): Cell => ({ glyph: part.glyph, color: part.color, isDim: part.isDim })),
   )
-  const track = cells.length - WALKER_CELLS
 
-  if ((isMainWorking || background > 0) && cells.length >= WALKER_CELLS * 2) {
-    const along = placeOf(strides, track)
-    const place = nth % 2 === 0 ? along : track - along
-    const [left, right] = ARMS[strides % 2] ?? ['▗', '▖']
-    const walker = [left, ...BODY, right]
-    walker.forEach((glyph, i) => {
-      // An eye is the body's colour with the glyph cut out of it.
-      cells[place + i] = { glyph, color: WALKER_COLOR, isDim: false, isInverse: glyph === '▪' }
-    })
+  while (cells.length < width) {
+    cells.push(EMPTY)
   }
 
+  return cells
+}
+
+// The limit bars on one row of the scene. One alone takes the row. Of several, the first stands before
+// its name and the others after theirs, so the row begins and ends on a bar, as the rows over it do.
+function stripOf(gauges: Gauge[], width: number): Cell[] {
+  const worded = (text: string): Cell[] => [...text].map(glyph => ({ glyph, color: undefined, isDim: true }))
+  const names = gauges.map((gauge, i) => (gauges.length === 1 ? '' : i === 0 ? ` ${gauge.name}` : `  ${gauge.name} `))
+  const named = Math.floor((width - names.join('').length) / gauges.length)
+  // Where the names leave the bars no room, the bars go without them, a cell apart.
+  const each = named >= 2 ? named : Math.floor((width - (gauges.length - 1)) / gauges.length)
+  const cells = gauges.flatMap((gauge, i) => {
+    const bar = cellsOf(gauge.parts, Math.max(0, each))
+    const name = worded(named >= 2 ? names[i] ?? '' : i === 0 ? '' : ' ')
+
+    return i === 0 ? [...bar, ...name] : [...name, ...bar]
+  })
+  // What the division left over goes between the first bar and the rest.
+  const first = Math.max(0, each) + (named >= 2 ? (names[0] ?? '').length : 0)
+  cells.splice(first, 0, ...worded(' '.repeat(Math.max(0, width - cells.length))))
+
+  return cells.slice(0, Math.max(0, width))
+}
+
+// Cells drawn alike, side by side, are one Text.
+function runsOf(Text: Text, cells: Cell[]): RenderElement[] {
   const runs: RenderElement[] = []
   let start = 0
 
-  // Neighbouring cells drawn alike are one Text.
   for (let i = 1; i <= cells.length; i += 1) {
     const from = cells[start]
     const to = cells[i]
 
-    if (from && (!to || to.color !== from.color || to.isDim !== from.isDim || to.isInverse !== from.isInverse)) {
-      runs.push(Text({
-        color: from.color,
-        dimColor: from.isDim,
-        inverse: from.isInverse,
-        children: cells.slice(start, i).map(cell => cell.glyph).join(''),
-      }))
+    if (from && (!to || to.color !== from.color || to.isDim !== from.isDim)) {
+      const children = cells.slice(start, i).map(cell => cell.glyph).join('')
+      runs.push(Text(from.color === undefined ? { dimColor: from.isDim, children } : { color: from.color, dimColor: from.isDim, children }))
       start = i
     }
-  }
-
-  if (label !== '') {
-    runs.push(Text({ dimColor: true, children: label }))
   }
 
   return runs
 }
 
-// A bar's legend: each part's swatch, name and figure, then plain facts.
-function legendRow(Box: Box, Text: Text, parts: Part[], figures: string[], facts: string[]): RenderElement {
-  const entries = parts.map((part, i) =>
-    Box({
-      flexDirection: 'row',
-      children: [
-        Text({ color: part.color, dimColor: part.isDim, children: part.glyph }),
-        Text({ dimColor: true, children: ` ${part.name} ${figures[i] ?? ''}` }),
-      ],
-    }),
-  )
+// A line of the readout as drawn: its label, dim, in its column, then its runs. A line never wraps.
+function written(Text: Text, line: Line): RenderElement[] {
+  return [
+    Text({ dimColor: true, children: line.label.slice(0, LABEL - 1).padEnd(LABEL) }),
+    ...line.runs.filter(run => run.text !== '').map(run =>
+      Text(run.color === undefined
+        ? { dimColor: run.isDim === true, wrap: 'truncate-end', children: run.text }
+        : { color: run.color, dimColor: run.isDim === true, wrap: 'truncate-end', children: run.text }),
+    ),
+  ]
+}
 
-  return Box({
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: 2,
-    children: [...entries, ...facts.map(fact => Text({ dimColor: true, children: fact }))],
-  })
+// A line that says as many of `parts`, from the first, as fit in `width`.
+function lineOf(label: string, parts: string[], width: number, isDim: boolean): Line {
+  const text = fit(parts, width)
+
+  return { label, runs: text === '' ? [] : [{ text, isDim }] }
+}
+
+function chipOf(part: Part, figure: string): Chip {
+  return { glyph: part.glyph, color: part.color, isDim: part.isDim, text: `${part.name} ${figure}`, weight: part.weight }
+}
+
+// A legend on at most `rows` lines of `width`, its entries in the bar's order, with `extra` after them
+// where there is room for all. When the entries themselves do not all fit, the lightest give way and the
+// legend ends on how many did.
+function legendOf(chips: Chip[], extra: Chip[], width: number, rows: number): Run[][] {
+  let kept = chips
+  let lines = wrapped([...chips, ...extra], width, rows) ?? wrapped(chips, width, rows)
+
+  while (!lines && kept.length > 0) {
+    const lightest = kept.reduce((least, chip) => (chip.weight < least.weight ? chip : least))
+    kept = kept.filter(chip => chip !== lightest)
+    const more: Chip = { glyph: '', color: undefined, isDim: true, text: `+${chips.length - kept.length}`, weight: 0 }
+    // A count of what is not shown, alone, says nothing.
+    lines = kept.length > 0 ? wrapped([...kept, more], width, rows) : []
+  }
+
+  return lines ?? []
+}
+
+// Entries laid out in order on lines of `width`, GAP apart; null when they need more than `rows` lines.
+function wrapped(chips: Chip[], width: number, rows: number): Run[][] | null {
+  const lines: Run[][] = []
+  let taken = 0
+
+  for (const chip of chips) {
+    const size = (chip.glyph === '' ? 0 : chip.glyph.length + 1) + chip.text.length
+    let line = lines.at(-1)
+
+    if (!line || taken + GAP + size > width) {
+      line = []
+      lines.push(line)
+      taken = 0
+    } else {
+      line.push({ text: ' '.repeat(GAP) })
+      taken += GAP
+    }
+
+    if (lines.length > rows || size > width) {
+      return null
+    }
+
+    if (chip.glyph !== '') {
+      line.push({ text: chip.glyph, isDim: chip.isDim, ...(chip.color === undefined ? {} : { color: chip.color }) }, { text: ' ' })
+    }
+
+    line.push({ text: chip.text, isDim: true })
+    taken += size
+  }
+
+  return lines
+}
+
+// Steps since the start of today, the week, the month and the year. Periods that count the same are
+// said once ("week/month/year 500"): on the first day of a week all four do.
+function periodsOf(totals: Record<'today' | 'week' | 'month' | 'year', Day>): string[] {
+  const groups: Array<{ names: string[]; steps: number }> = []
+
+  for (const period of ['today', 'week', 'month', 'year'] as const) {
+    const last = groups.at(-1)
+
+    if (last && last.steps === totals[period].steps) {
+      last.names.push(period)
+    } else {
+      groups.push({ names: [period], steps: totals[period].steps })
+    }
+  }
+
+  return groups.map(group => `${group.names.join('/')} ${count(group.steps)}`)
+}
+
+// What the last request carried, as the API counted it: everything sent in (and how much of it was read
+// from the prompt cache), and what came out.
+function sentOf(last: ModelUsage | null): string[] {
+  if (!last) {
+    return []
+  }
+
+  const sent = last.input_tokens + last.cache_read_input_tokens + last.cache_creation_input_tokens
+
+  return [`last request: in ${short(sent)} (${short(last.cache_read_input_tokens)} cached)`, `out ${short(last.output_tokens)}`]
+}
+
+// What the current prompt has cost so far, in the cents the ledger gives it.
+function promptOf(money: Ledger, bill: Bill): string {
+  const last = money.turns.at(-1)
+
+  return last ? `this prompt ${money$(bill.rows.find(row => row.turn === last)?.amount ?? 0)}` : ''
 }
 
 // One category, in the theme colour /context draws it in.
@@ -753,7 +986,7 @@ function partOf(segment: Segment): Part {
   return { name: segment.name, weight: segment.tokens, glyph: GLYPH[segment.kind], color: segment.color, isDim: segment.kind === 'free' }
 }
 
-// The third row. A window the account reports is shown by what is LEFT of it, draining. With no window
+// The limit bars. A window the account reports is shown by what is LEFT of it, draining. With no window
 // (an account billed by the API) the month's spend stands in: draining the budget when one is set, and
 // growing against the next round figure when none is. A set budget shows beside the windows too.
 function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
@@ -765,8 +998,8 @@ function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
     return {
       name: WINDOW_NAME[window.kind] ?? window.kind,
       parts: drain(left, 100 - left),
-      label: `  ${Math.round(left)}% left${reset}`,
-      short: `  ${Math.round(left)}% left`,
+      label: `${Math.round(left)}% left${reset}`,
+      short: `${Math.round(left)}% left`,
     }
   })
 
@@ -775,8 +1008,8 @@ function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
     gauges.push({
       name: 'month',
       parts: drain(left, budget - left),
-      label: `  ${dollars(left)} left of ${dollars(budget)}`,
-      short: `  ${dollars(left)} left`,
+      label: `${dollars(left)} left of ${dollars(budget)}`,
+      short: `${dollars(left)} left`,
     })
   } else if (gauges.length === 0 && hasMoney) {
     // No ceiling is known: the bar fills toward the next round figure, then starts on the one after.
@@ -787,8 +1020,8 @@ function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
         { name: 'spent', weight: monthSpend, glyph: '█', color: 'permission', isDim: false },
         { name: 'room', weight: ceiling - monthSpend, glyph: '░', color: 'inactive', isDim: true },
       ].filter(part => part.weight > 0),
-      label: `  ${dollars(monthSpend)} spent, of ${dollars(ceiling)} next`,
-      short: `  ${dollars(monthSpend)} spent`,
+      label: `${dollars(monthSpend)} spent · bar full at ${dollars(ceiling)}`,
+      short: `${dollars(monthSpend)} spent`,
     })
   }
 
@@ -837,16 +1070,16 @@ function billOf(money: Ledger): Bill {
   return { total, before, folded, main, agents: total - before - folded - main, rows }
 }
 
+// Who spent what the ledger saw being spent. (The mascot's colour is left to the mascot.)
 function spendParts(bill: Bill): Part[] {
   return [
-    { name: 'Main conversation', weight: bill.main, glyph: '█', color: 'claude', isDim: false },
-    { name: 'Subagents', weight: bill.agents, glyph: '█', color: 'permission', isDim: false },
+    { name: 'Main', weight: bill.main, glyph: '█', color: 'permission', isDim: false },
+    { name: 'Subagents', weight: bill.agents, glyph: '█', color: 'cyan_FOR_SUBAGENTS_ONLY', isDim: false },
     { name: 'Earlier prompts', weight: bill.folded, glyph: '▒', color: 'inactive', isDim: false },
-    { name: 'Before tracking', weight: bill.before, glyph: '░', color: 'inactive', isDim: true },
   ].filter(part => part.weight > 0)
 }
 
-// What the cost legend adds: the rate while working, once there is a minute of it.
+// The rate while working, once there is a minute of it.
 function rateOf(money: Ledger, bill: Bill): string[] {
   const itemised = (bill.total - bill.before) / 100
 
@@ -904,7 +1137,7 @@ function audit(): string {
 
     if (reading.last) {
       const sent = reading.last.input_tokens + reading.last.cache_read_input_tokens + reading.last.cache_creation_input_tokens
-      lines.push(`note the last request carried ${count(sent)} tokens in and ${count(reading.last.output_tokens)} out; the bar's total is Claude Code's estimate for the next one`)
+      lines.push(`note the last request sent ${count(sent)} tokens in (${count(reading.last.input_tokens)} new, ${count(reading.last.cache_read_input_tokens)} read from the cache, ${count(reading.last.cache_creation_input_tokens)} written to it) and got ${count(reading.last.output_tokens)} out; the bar's total is Claude Code's estimate for the next one`)
     }
   } else {
     lines.push('note no reading of the context window yet')
@@ -939,22 +1172,34 @@ function usedBy(tokens: Tokens, model: string | null): string {
   return ` · ${model ?? 'model unknown'} · in ${short(tokens.input)}, out ${short(tokens.output)}, cache read ${short(tokens.cacheRead)}, cache write ${short(tokens.cacheWrite)}${cached}`
 }
 
-// The longest run of a label's parts, from the first, that leaves the bar its least width.
-function fit(parts: string[], inner: number): string {
+// The longest run of `parts`, from the first, that fits in `room`.
+function fit(parts: string[], room: number): string {
   const kept = parts.filter(part => part !== '')
 
   for (let size = kept.length; size > 0; size -= 1) {
-    const label = `  ${kept.slice(0, size).join('  ·  ')}`
+    const text = kept.slice(0, size).join(' · ')
 
-    if (inner - label.length >= MIN_BAR) {
-      return label
+    if (text.length <= room) {
+      return text
     }
   }
 
   return ''
 }
 
-// Where a walker stands after `steps` steps on a track of `track` cells: out and back, a cell a step.
+// Where the mascot stands after `steps` steps: which bar, and how far along it. It walks the first bar
+// left to right, steps down, walks the second right to left, and so on; from the end of the last it
+// walks the whole way back. A cell or a row a step.
+function spotOf(steps: number, bars: number, span: number): { bar: number; at: number } {
+  const stops = Math.max(0, span) + 1
+  const index = placeOf(steps, bars * stops - 1)
+  const bar = Math.floor(index / stops)
+  const along = index % stops
+
+  return { bar, at: bar % 2 === 0 ? along : stops - 1 - along }
+}
+
+// Where `steps` steps lead on a track of `track` cells walked out and back, a cell a step.
 function placeOf(steps: number, track: number): number {
   if (track <= 0) {
     return 0

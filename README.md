@@ -1,17 +1,11 @@
 # Penny Patrol
 
-Three meters above your Claude Code prompt: how full the context window is, where this session's dollars
-went, and what is left of your limits. While Claude works, a small walker paces each bar and counts its
-steps.
+Three meters above your Claude Code prompt: how full the context window is, who spent this session's
+dollars, and what is left of your limits. A small mascot walks them while Claude works.
 
-```
- ████████████████▗█▪██▪█▖██████████░░░░░░░░░░░░░░░░░░░░░░▒▒▒  73%  730.9k / 1M  ·  claude-opus-5-5  ·  max  ·  128 steps
- █ System prompt 3.4k  █ System tools 30k  █ Memory files 2.3k  █ Messages 686.1k  ░ Free space 236.1k  ▒ Autocompact buffer 33k
- ██████████████████████████░░░░░░░░░░░░░░░▝█▪██▪█▘░░░░░░░░░░                    $12.48  ·  this prompt $2.83  ·  3,412 steps
- █ Main conversation $9.61  █ Subagents $2.87  $13.17/h while working
- 5h ██████████████░░░░░░░░░  62% left · resets in 1h 20m    week ████░░░░░░░░░░░░░░░░░░░  15% left · resets in 3d 5h
- steps  today 3,412 · week 3,412 · month 3,412 · year 3,412    spend  today $12.48 · week $12.48 · month $12.48 · year $12.48
-```
+![Penny Patrol above the prompt: three bars at the left with the mascot standing on the first, and a readout at the right](docs/preview.png)
+
+*The mod's own drawing, rendered outside a terminal for this page. Your terminal's theme sets the colours.*
 
 An unofficial community mod for Claude Code. Not affiliated with Anthropic.
 
@@ -24,7 +18,7 @@ claude plugin marketplace add Kumaraman110/penny-patrol
 claude plugin install penny-patrol@penny-patrol
 ```
 
-Start `claude`. The bars are above the prompt.
+Start `claude`. The band is above the prompt.
 
 To try it once without installing anything:
 
@@ -43,39 +37,43 @@ rm -rf ~/.penny-patrol    # its saved ledgers and counters; skip this to keep th
 
 ## What you see
 
-**The context bar.** The window as one stacked bar, a colour per category, the same categories and
-colours as `/context`. What is in use comes first, then the free space, then the autocompact buffer at the
-window's end, so the pale run in the middle is the room left before Claude Code compacts. Beside it: the
-share in use, the model, the reasoning effort, and the steps walked for the current prompt.
+The bars stand at the left, with two free rows over each. Every word is at the right, one line a row,
+each under a short label.
+
+| Line | What it says |
+| --- | --- |
+| `model` | The model, and the reasoning effort once a tool call has reported it. |
+| `steps` | Working time, a step a second: today, this week (from Sunday), this month, this year, over every session on this machine. Periods that count the same are said once: `today 412 · week/month 3,412 · year 12,480`. |
+| `context` | Beside the context bar: the share in use, tokens in use of the window, and what is free before Claude Code compacts. |
+| | Under it, the legend: the categories and colours of `/context`. When they do not all fit, the smallest give way and the line ends on how many (`+2`). |
+| | When the legend fits on one line, the last request: everything sent in (and how much of it was read from the prompt cache), and what came out. |
+| `cost` | Beside the cost bar: the session's total as Claude Code reports it, what the current prompt has cost so far, and the hourly rate while working. |
+| | Under it: who spent it. `Main` is the main conversation, `Subagents` everything it started. What was spent before Penny Patrol first looked is a figure here, not a part of the bar. |
+| `5h`, `week` | What is *left* of each limit window your account reports, and when it resets. |
+| `month` | For an account billed by the API, which has no such window: the month's spend. |
+
+**The context bar** is the window as one stacked bar. What is in use comes first, then the free space
+(dotted), then the autocompact buffer (hatched) at the window's end, so the dotted run is the room left.
 
 *Messages* is the conversation itself: your prompts, Claude's replies and thinking, every tool call and
 every tool result. It is not split into input and output, because everything in the window is input to
-the next request. What the last request really sent is on the legend when Claude Code reports it:
-uncached input, tokens read from the prompt cache, tokens written to it, and output.
+the next request.
 
-**The cost bar.** Where this session's dollars went: the main conversation, its subagents, and what was
-spent before Penny Patrol first looked. Beside it: the session's total, what the current prompt has cost
-so far, and the session's steps. The legend adds the hourly rate while working.
+**The limit bars** drain as you use a window: green above half, amber down to a fifth, red below. The
+month's bar grows toward the next round figure, or, once you give it a budget, drains that.
 
-**The limit bars.** One for each window your account reports (five hours, the week, a gateway's spend
-limit). Each shows what is *left*, draining as you use it: green above half, amber down to a fifth, red
-below. The time to its reset is beside the bar.
+**The mascot** stands on a bar. While anything runs (a turn, a background shell, a subagent) it takes a
+step a second: along the context bar, down, back along the cost bar, down, along the limit bars, and then
+the whole way back. When nothing runs it stands where it is.
 
-An account billed by the API has no such window. It gets the month's spend instead: a bar that grows
-toward the next round figure, or, once you give it a budget, one that drains it.
-
-**The last line.** Steps and spend for today, this week (from Sunday), this month and this year, summed
-over every session on this machine.
-
-**The walkers.** While anything runs (a turn, a background shell, a subagent) a walker paces every bar,
-one step a second, neighbours in opposite directions. When nothing runs they step off and the bars are
-bare. A step is a second of work, so the step counts are working time.
+**In a small terminal** (narrower than 65 columns, or where the band may not take its nine rows) the
+bars are drawn alone, each with its figures, and the mascot stays home.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `/penny-patrol` | Hide the bars, or show them again. This session only. |
+| `/penny-patrol` | Hide the band, or show it again. This session only. |
 | `/penny-patrol costs` | The ledger: every prompt, what it cost, and the tokens that explain it. |
 | `/penny-patrol audit` | Check the figures against each other and against what Claude Code reports. |
 | `/penny-patrol budget 8000` | Set the month's budget in dollars. `budget off` clears it. |
@@ -106,13 +104,13 @@ cent apart, and `unaccounted` is always $0.00.
 
 What it cannot know:
 
-- **Anything spent before it first looked.** That is shown as "before tracking" and never itemised.
+- **Anything spent before it first looked.** That is "before tracking": a figure, never itemised.
 - **Which of two things running at once caused a rise.** A rise seen while the main conversation and a
   subagent both work is booked to whichever acted next.
 - **Prices.** No price list is exposed to a mod, so there is no split of dollars by token type. The
   token counts on each ledger line are the API's own.
 - **Your bill.** On a subscription the dollars are Claude Code's API-equivalent figure, not a charge.
-- **Your organisation's balance.** The month bar and the calendar totals count the sessions on this
+- **Your organisation's balance.** The month bar and the totals by period count the sessions on this
   machine that had Penny Patrol loaded. A budget is a number you give it, not one it can read.
 
 A session keeps its last 200 prompts line by line. Older ones fold into a single "earlier prompts"
@@ -122,7 +120,8 @@ figure: still counted, no longer listed.
 
 `/penny-patrol audit` checks, on the spot, that the categories add up to the total Claude Code reports,
 that in use plus free plus buffer make the window, that the cents add up to the reported total, and that
-the steps saved match the steps counted. A line that does not hold starts with `OFF`.
+the steps saved match the steps counted. A line that does not hold starts with `OFF`. It also gives the
+last request in full: new input, tokens read from the cache, tokens written to it, and output.
 
 Two checks you can make yourself: `/context` for the window (its counts come from the token-count API,
 so they differ a little from the local estimate the bar uses) and `/cost` for the session's dollars.
@@ -135,9 +134,9 @@ claude plugin test penny-patrol
 
 ## Several sessions
 
-Each session has its own ledger, its own counters and its own choice to hide the bars, even when two
+Each session has its own ledger, its own counters and its own choice to hide the band, even when two
 sessions run in the same folder. The limits and the budget belong to your account, so every session
-shows the newest reading any of them saw, within five seconds. The calendar totals add all of them up.
+shows the newest reading any of them saw, within five seconds. The steps by period add all of them up.
 
 ## Where it keeps things
 
@@ -160,7 +159,8 @@ files; that is all.
 - Reasoning effort is only reported to a mod during a tool call, so it appears after the session's first
   one.
 - After a turn you interrupt, background work is not seen again until the next turn ends.
-- The band is six rows. The `[-]` beside it collapses it; `/penny-patrol` hides it.
+- While nothing runs the band is drawn again once a minute, so the reset times keep moving.
+- The `[-]` beside the band collapses it; `/penny-patrol` hides it.
 
 ## License
 
