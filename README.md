@@ -43,7 +43,7 @@ each under a short label.
 | Line | What it says |
 | --- | --- |
 | `model` | The model, and the reasoning effort once a tool call has reported it. |
-| `steps` | Working time, a step a second: today, this week (from Sunday), this month, this year, over every session on this machine. |
+| `steps` | This session's working time, a step a second: today, this week (from Sunday), this month, this year. |
 | `context` | Beside the context bar: the share in use, tokens in use of the window, and what is free before Claude Code compacts. |
 | | Under it, the legend: the categories and colours of `/context`. When they do not all fit, the smallest give way and the line ends on how many (`+2`). |
 | | When the legend fits on one line, the last request: everything sent in (and how much of it was read from the prompt cache), and what came out. |
@@ -86,7 +86,7 @@ other; each answers at once and none of them sends a request to the model.
 | Command | What it does |
 | --- | --- |
 | `/penny-patrol` | Hide the band, or show it again. This session only; the choice is remembered. |
-| `/penny-patrol costs` | Print the ledger: every prompt, what it cost, the tokens that explain it, and the hourly rate while working. |
+| `/penny-patrol costs` | Print the ledger: every prompt, what it cost, the tokens that explain it, and the hourly rate while working. Also what every session on this machine adds up to: steps and spend by day, week, month and year. |
 | `/penny-patrol audit` | Check the figures against each other and against what Claude Code reports. |
 | `/penny-patrol budget` | Say what the month's budget is. |
 | `/penny-patrol budget <dollars>` | Set the month's budget, for example `/penny-patrol budget 8000`. `$8,000` works too. Every session on this machine takes it up. |
@@ -103,7 +103,8 @@ Session total reported by Claude Code: $12.48
   unaccounted:      $0.00
   working time:     3,412 steps (56m) · $13.17/h while working
   prompts:          14 · average $0.89 · most expensive $2.83
-  this machine:     today $12.48 · week $12.48 · month $12.48 · year $12.48
+  this machine:     steps today 1,930 · week 9,412 · month 9,412 · year 31,206
+                    spend today $19.20 · week $61.75 · month $61.75 · year $204.10
 
   1.     $2.83  fix the flaky test in the recovery suite
                 main $2.11 · claude-opus-5-5 · in 1.2k, out 8.4k, cache read 2.1M, cache write 35k (98% of input from cache)
@@ -167,9 +168,16 @@ claude plugin test penny-patrol
 
 ## Several sessions
 
-Each session has its own ledger, its own counters and its own choice to hide the band, even when two
-sessions run in the same folder. The limits and the budget belong to your account, so every session
-shows the newest reading any of them saw, within five seconds. The steps by period add all of them up.
+What the band says is this session's, except the limits. Two sessions in the same folder each have their
+own ledger, their own counters and their own choice to hide the band.
+
+| On the band | Whose it is |
+| --- | --- |
+| `model`, `steps`, `context`, `cost` | this session's |
+| `5h`, `week` | your account's: every session shows the newest reading any of them saw, within five seconds |
+| `month` (API billing) | every session's on this machine, as is the budget you set |
+
+What the sessions on this machine add up to, in steps and in dollars, is in `/penny-patrol costs`.
 
 ## Where it keeps things
 

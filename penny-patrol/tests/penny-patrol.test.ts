@@ -792,8 +792,10 @@ test('a budget beside the limit windows: the first has its line above the bars, 
   expect(sceneOf(lines[8]!, 160)).toMatch(/^[█░]{15} 5h {2}week [█░]{15} {2}month [█░]{15}$/)
 })
 
-test('steps add up by day, week from Sunday, month and year, across every session on this machine', SLOW, async ($, on) => {
+test('the band counts this session\'s steps by day, week from Sunday, month and year; the ledger adds every session\'s on this machine', SLOW, async ($, on) => {
   const world = engine(on, { usd: 1 })
+  // This session, on earlier days of this year and month; and another session's days.
+  put(world, 'days/session-one.json', { '2026-09-30': { steps: 5, usd: 0 }, '2026-10-03': { steps: 20, usd: 0 }, '2026-10-04': { steps: 3, usd: 0 } })
   put(world, 'days/another-session.json', {
     '2025-12-31': { steps: 999, usd: 9 },
     '2026-09-30': { steps: 7, usd: 2 },
@@ -804,24 +806,31 @@ test('steps add up by day, week from Sunday, month and year, across every sessio
   const ui = await mount($, 120)
   const steps = async (): Promise<string> => saidOf((await linesOf(ui))[1]!, 120)
   // Today is a Sunday, so the week is today; yesterday is this month's, the 30th of September this year's.
-  expect(await steps()).toBe('steps    today 10 · week 10 · month 110 · year 117')
+  expect(await steps()).toBe('steps    today 3 · week 3 · month 23 · year 28')
 
   await turnStart($, 'work')
   await world.clock.advance(4_000)
   world.usd = 1.25
   await turnEnd($)
   await stop($, [])
-  expect(await steps()).toBe('steps    today 14 · week 14 · month 114 · year 121')
-  // The dollars by period are the ledger's to say, not the band's.
+  expect(await steps()).toBe('steps    today 7 · week 7 · month 27 · year 32')
+  // Neither the other session's steps nor anyone's dollars by period are on the band: the ledger has both.
   expect((await linesOf(ui)).join('\n')).not.toMatch(/today.*\$/)
-  expect((await command($, 'costs')).text).toContain('this machine:     today $0.75 · week $0.75 · month $1.75 · year $3.75')
+  let text = (await command($, 'costs')).text
+  expect(text).toContain('this machine:     steps today 17 · week 17 · month 137 · year 149')
+  expect(text).toContain('                    spend today $0.75 · week $0.75 · month $1.75 · year $3.75')
+  // The month's bar is the one line of the band that is every session's: a budget is the account's.
+  expect(saidOf((await linesOf(ui))[8]!, 120)).toBe('month    $1.75 spent · bar full at $2.00')
 
-  // The other session goes on working: its file changes, and the next look takes it up.
+  // The other session goes on working: its file changes, and the next look takes it up, in the ledger only.
   await world.clock.advance(1_000)
   put(world, 'days/another-session.json', { '2026-10-04': { steps: 1_010, usd: 20.5 } })
   await world.clock.advance(30_000)
-  expect(await steps()).toBe('steps    today 1,014 · week 1,014 · month 1,014 · year 1,014')
-  expect((await command($, 'costs')).text).toContain('this machine:     today $20.75')
+  expect(await steps()).toBe('steps    today 7 · week 7 · month 27 · year 32')
+  text = (await command($, 'costs')).text
+  expect(text).toContain('this machine:     steps today 1,017 · week 1,017 · month 1,037 · year 1,042')
+  expect(text).toContain('spend today $20.75')
+  expect(saidOf((await linesOf(ui))[8]!, 120)).toBe('month    $20.75 spent · bar full at $50.00')
 })
 
 test('audit says the figures agree, and says so when they do not', SLOW, async ($, on) => {

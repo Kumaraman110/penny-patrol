@@ -19,11 +19,14 @@
 // turn, or a background shell or subagent) it takes a step a second, along the first bar, down, back
 // along the second, down, along the third, and then the whole way back. It takes the colour of the part
 // of the bar under it, and its face says how things are there. Steps are kept by day, so they add up to
-// the week (from Sunday), the month and the year, across every session on this machine.
+// the week (from Sunday), the month and the year: this session's on the band, every session's on this
+// machine in the ledger.
 //
 // WHAT IS WHOSE: a session's ledger, days and choices are its own (sessions/, days/ under the folder
-// below, one file a session, written by that session alone). The limits and the budget are the
-// account's: the newest reading any session wrote is the one every session shows.
+// below, one file a session, written by that session alone), and so is everything the band says of the
+// model, the steps, the context and the cost. The limits and the budget are the account's: the newest
+// reading any session wrote is the one every session shows. What the sessions on this machine add up to
+// (steps, dollars) is the ledger's to say.
 //
 // The host reads on(...) and $.noun.method(...) from source, so they are spelled literally, and helpers
 // that take $ are top-level functions.
@@ -620,8 +623,8 @@ function dateOf(date: Date): string {
 }
 
 // Steps and dollars since the start of today, of the week (Sunday), of the month and of the year, over
-// every session's days on this machine.
-function calendar(at: number): Record<'today' | 'week' | 'month' | 'year', Day> {
+// the days given: this session's alone, or every session's on this machine (see everyDays).
+function calendar(at: number, sources: Days[]): Record<'today' | 'week' | 'month' | 'year', Day> {
   const now = new Date(at)
   const today = dateOf(now)
   const from = {
@@ -632,7 +635,7 @@ function calendar(at: number): Record<'today' | 'week' | 'month' | 'year', Day> 
   }
   const sums = { today: { steps: 0, usd: 0 }, week: { steps: 0, usd: 0 }, month: { steps: 0, usd: 0 }, year: { steps: 0, usd: 0 } }
 
-  for (const theirs of [days, ...[...others.values()].map(other => other.days)]) {
+  for (const theirs of sources) {
     for (const [date, day] of Object.entries(theirs)) {
       for (const span of ['today', 'week', 'month', 'year'] as const) {
         // Dates written year first compare as text.
@@ -647,13 +650,19 @@ function calendar(at: number): Record<'today' | 'week' | 'month' | 'year', Day> 
   return sums
 }
 
+// This session's days and the other sessions', as last read.
+function everyDays(): Days[] {
+  return [days, ...[...others.values()].map(other => other.days)]
+}
+
 function band(Box: Box, Text: Text, now: Reading, columns: number, maxRows: number): RenderElement {
   // paddingX takes two cells.
   const inner = Math.max(1, columns - 2)
   const money = ledger !== null && ledger.seen > 0 ? ledger : null
   const bill = money ? billOf(money) : null
-  const totals = calendar(nowMs)
-  const gauges = gaugesOf(totals.month.usd, money !== null)
+  // The steps are this session's own; the month's spend is every session's, as the budget is.
+  const mine = calendar(nowMs, [days])
+  const gauges = gaugesOf(calendar(nowMs, everyDays()).month.usd, money !== null)
   const free = now.segments.reduce((sum, segment) => sum + (segment.kind === 'free' ? segment.tokens : 0), 0)
   // The room before compaction is what is in use and what is free; the buffer is not room.
   const isTight = free < (now.used + free) * TIGHT_SHARE
@@ -730,7 +739,7 @@ function band(Box: Box, Text: Text, now: Reading, columns: number, maxRows: numb
 
     const header = [
       lineOf('model', [now.model, effort === null ? '' : `${effort} effort`], width, true),
-      lineOf('steps', (['today', 'week', 'month', 'year'] as const).map(period => `${period} ${count(totals[period].steps)}`), width, true),
+      lineOf('steps', (['today', 'week', 'month', 'year'] as const).map(period => `${period} ${count(mine[period].steps)}`), width, true),
     ]
     const rows = scene(Box, Text, sections, header, track)
 
@@ -1098,7 +1107,7 @@ function statement(money: Ledger): string {
   const most = Math.max(0, ...bill.rows.map(row => row.amount))
   const rate = money.steps > 0 && itemised > 0 ? ` · ${dollars(itemised / 100 / (money.steps / 3600))}/h while working` : ''
   const prompts = bill.rows.length
-  const totals = calendar(nowMs)
+  const totals = calendar(nowMs, everyDays())
 
   return [
     `Session total reported by Claude Code: ${money$(bill.total)}`,
@@ -1108,7 +1117,8 @@ function statement(money: Ledger): string {
     `  unaccounted:      ${money$(bill.total - bill.before - bill.folded - bill.rows.reduce((sum, row) => sum + row.amount, 0))}`,
     `  working time:     ${stepsOf(money.steps)} (${span(money.steps)})${rate}`,
     `  prompts:          ${prompts}${prompts > 0 ? ` · average ${money$(Math.round(itemised / prompts))} · most expensive ${money$(most)}` : ''}`,
-    `  this machine:     today ${dollars(totals.today.usd)} · week ${dollars(totals.week.usd)} · month ${dollars(totals.month.usd)} · year ${dollars(totals.year.usd)}`,
+    `  this machine:     steps today ${count(totals.today.steps)} · week ${count(totals.week.steps)} · month ${count(totals.month.steps)} · year ${count(totals.year.steps)}`,
+    `                    spend today ${dollars(totals.today.usd)} · week ${dollars(totals.week.usd)} · month ${dollars(totals.month.usd)} · year ${dollars(totals.year.usd)}`,
     '',
     ...lines,
   ].join('\n')
