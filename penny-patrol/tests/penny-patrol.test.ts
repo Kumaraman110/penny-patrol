@@ -13,10 +13,7 @@ const FOLDER = `${HOME}/.penny-patrol`
 const BUFFER = 33_000
 const FIXED = 20_000 // system prompt + system tools
 const NOTHING = 'nothing drawn'
-// What a bar's free or spent stretch is drawn on (black, whatever the theme), the white of the words over
-// it, and the colour of words cut out of a part.
-const TRACK = '#000000'
-const TRACK_WORD = '#ffffff'
+// The colour of words cut out of a part of a bar. (What is free or gone has no colour of its own.)
 const WORD = 'inverseText'
 // The mascot as text: its face between its arms, and its legs apart, then together.
 const faced = (face: string): string => `▄${face}▄`
@@ -224,8 +221,14 @@ const piecesOf = (el: El): Array<{ text: string; color: unknown; ground: unknown
     isBold: run.props?.bold === true,
     href: run.props?.href,
   }))
-// A bar as drawn: each stretch's text, the ground it is drawn on, and the colour of its glyphs.
-const barOf = (el: El): Array<[string, unknown, unknown]> => piecesOf(el).filter(piece => piece.ground !== undefined).map(piece => [piece.text, piece.ground, piece.color])
+// A bar as drawn: each stretch's text, the ground it is drawn on (none for what is free or gone), and the
+// colour of its glyphs. The bar is what stands before the two blank cells that part it from its line.
+const barOf = (el: El): Array<[string, unknown, unknown]> => {
+  const pieces = piecesOf(el)
+  const end = pieces.findIndex(piece => piece.text === '  ' && piece.ground === undefined)
+
+  return pieces.slice(0, end < 0 ? pieces.length : end).map(piece => [piece.text, piece.ground, piece.color])
+}
 // The scene's width in a band of `columns`, as the mod lays it out: two fifths of what the padding
 // leaves, the rest (to 136 cells) being the readout's, two cells between them.
 const trackOf = (columns: number): number => columns - 4 - Math.min(136, columns - 4 - Math.floor((columns - 2) * 0.4))
@@ -324,7 +327,7 @@ test('the scene and the readout: a limit first with the model beside it, the con
   expect(Math.max(...lines.map(line => line.length))).toBeLessThanOrEqual(118)
 })
 
-test('every cell of a bar is drawn as background: a part in its colour, what is free in black; the autocompact buffer is no part of the bar', SLOW, async ($, on) => {
+test('a part of a bar is drawn as background in its colour, what is free as a faint shade with no colour of its own; the autocompact buffer is no part of the bar', SLOW, async ($, on) => {
   engine(on)
   await begin($)
   const ui = await mount($, 120)
@@ -337,8 +340,10 @@ test('every cell of a bar is drawn as background: a part in its colour, what is 
     ['█', 'promptBorder', 'promptBorder'],
     ['█', 'inactive', 'inactive'],
     ['█', 'purple', 'purple'],
-    ['░', TRACK, TRACK],
+    ['░', undefined, undefined],
   ])
+  // What is free is the terminal's own text colour, dim: it reads on a light terminal and a dark one.
+  expect(piecesOf(rows[2]!).slice(0, 4).map(piece => piece.isDim)).toEqual([false, false, false, true])
   // Forty-seven cells for 4k, 16k and 40k in use and 107k free, each part keeping a cell.
   expect(barOf(rows[2]!).map(([text]) => text.length)).toEqual([2, 5, 11, 29])
   // The legend's swatches are the bar's, and it has no entry for the buffer either: nothing is under it.
@@ -934,19 +939,21 @@ test('a limit bar shows what is left of its window, draining, in the colour of h
   expect(rows).toHaveLength(9)
   expect([2, 8].map(i => saidOf(textOf(rows[i]!), 120))).toEqual(['Model    test-model', 'Steps    Today 0 · Week 0 · Month 0 · Year 0'])
   // What is left is the filled part: green above half, red under a fifth. The words are cut out of it
-  // in the colour for that; over what is gone they are white on black, and the rest of what is gone is
-  // black alone.
+  // in the colour for that. What is gone has no colour of its own: the words over it are the terminal's
+  // plain text, and the rest of it a dim shade.
   expect(barOf(rows[2]!)).toEqual([
     [' 5h limit · 60% left · Reset', 'success', WORD],
-    ['s in 1h 20m ', TRACK, TRACK_WORD],
-    ['░'.repeat(7), TRACK, TRACK],
+    ['s in 1h 20m ', undefined, undefined],
+    ['░'.repeat(7), undefined, undefined],
   ])
   expect(barOf(rows[8]!)).toEqual([
     [' Week li', 'error', WORD],
-    ['mit · 15% left · Resets in 3d 5h ', TRACK, TRACK_WORD],
-    ['░'.repeat(6), TRACK, TRACK],
+    ['mit · 15% left · Resets in 3d 5h ', undefined, undefined],
+    ['░'.repeat(6), undefined, undefined],
   ])
-  expect([TRACK, TRACK_WORD]).toEqual(['#000000', '#ffffff'])
+  expect([2, 8].map(i => piecesOf(rows[i]!).slice(1, 3).map(piece => piece.isDim))).toEqual([[false, true], [false, true]])
+  // No colour anywhere on the band is one of the mod's own choosing: each is the theme's, or none.
+  expect(JSON.stringify(await ui.drawn())).not.toMatch(/#[0-9a-fA-F]{3,8}|rgb\(/)
   // Written for the other sessions, stamped with when it was read.
   expect(fileOf(world, 'limits.json')).toMatchObject({ at: NOW, windows: [{ kind: 'five_hour', percentUsed: 40 }, { kind: 'seven_day' }] })
 })
@@ -1014,14 +1021,14 @@ test('an account with no limit window gets the month\'s spend: growing, or drain
     return { bar: sceneOf(textOf(found), 120), said: saidOf(textOf(found), 120), ground: barOf(found)[0]?.[1] }
   }
   // Nothing spent since tracking began: an empty bar toward the first round figure.
-  expect(await month()).toEqual({ bar: ` Month · $0.00 spent · Bar full at $1.00 ${'░'.repeat(6)}`, said: '', ground: TRACK })
+  expect(await month()).toEqual({ bar: ` Month · $0.00 spent · Bar full at $1.00 ${'░'.repeat(6)}`, said: '', ground: undefined })
 
   await turnStart($, 'spend')
   world.usd = 103.04
   await turnEnd($)
   expect(await month()).toEqual({ bar: ` Month · $3.04 spent · Bar full at $5.00 ${'░'.repeat(6)}`, said: '', ground: 'permission' })
   // Twenty-eight of the forty-seven cells are spent: $3.04 of $5.00.
-  expect(barOf((await rowsOf(ui))[8]!).map(([text, ground]) => [text.length, ground])).toEqual([[28, 'permission'], [13, TRACK], [6, TRACK]])
+  expect(barOf((await rowsOf(ui))[8]!).map(([text, ground]) => [text.length, ground])).toEqual([[28, 'permission'], [13, undefined], [6, undefined]])
 
   expect((await command($, 'budget')).text).toContain('not set')
   expect((await command($, 'budget 8,000')).text).toContain('Budget set: $8,000.00 a month')

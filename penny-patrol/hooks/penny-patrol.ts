@@ -159,15 +159,16 @@ const RENEWED_MS = 30 * 60_000
 const RENEWED_POINTS = 1
 // A redraw a minute keeps the countdowns moving while nothing else does.
 const REDRAW_EVERY_TICKS = 60
-// Single-width block characters: they line up in every terminal font. A bar's cells are drawn as
-// BACKGROUND (see runsOf), so these are what a copy of the band carries, and only the shade shows.
+// Single-width block characters: they line up in every terminal font. A part of a bar is drawn as
+// BACKGROUND (see paintOf), so its block is what a copy of the band carries; what is free or gone is
+// drawn as its shade.
 const GLYPH: Record<Kind, string> = { used: '█', free: '░', buffer: '▒' }
 const SHADE = '▒'
-// What is free or gone in a bar is black, and the words over it white, whatever the theme: a theme's own
-// quiet colours are light in a light theme, and the terminal under it may be dark. Words cut out of a
-// part take the theme's colour for text on a colour.
-const TRACK = '#000000'
-const TRACK_WORD = '#ffffff'
+// What is free or gone in a bar has no colour of its own: it is a faint shade in the terminal's own text
+// colour, and the words over it are the terminal's own text, so it reads as an empty track on a light
+// terminal and on a dark one, whatever the theme (a theme's quiet colours are right only where the
+// terminal under it matches the theme). Words cut out of a part take the theme's colour for text on a
+// colour.
 const WORD = 'inverseText'
 const ORDER: Kind[] = ['used', 'free', 'buffer']
 const EMPTY: Cell = { glyph: '░', color: 'inactive', isDim: true, isTight: false }
@@ -2299,18 +2300,18 @@ function wordedCells(gauge: Gauge, width: number): Cell[] {
   })
 }
 
-// How a cell of a bar is drawn. Every cell is BACKGROUND, so a bar is one height along its length whatever
-// the terminal's line spacing, and the mascot stands on it: a part in its own colour, what is free or gone
-// in the track's black, each with its block glyph in that same colour (a copy of the band still carries
-// it). A shaded part shows its glyph over the track. A word written in the bar is cut out of a part, and
-// stands white over the track.
-function paintOf(cell: Cell): { backgroundColor: string; color?: string } {
+// How a cell of a bar is drawn. A part is BACKGROUND in its own colour, so what fills a bar is one height
+// along its length whatever the terminal's line spacing, and the mascot stands on it; its block glyph is
+// in that same colour (a copy of the band still carries it), and a word written in it is cut out of it.
+// What is free or gone has no ground: its shade is drawn dim and a word over it plain, both in the
+// terminal's own colour. A shaded part is its glyph in its colour.
+function paintOf(cell: Cell): { backgroundColor?: string; color?: string; dimColor?: boolean } {
   if (cell.isDim || cell.color === undefined) {
-    return { backgroundColor: TRACK, color: cell.isWord === true ? TRACK_WORD : TRACK }
+    return cell.isWord === true ? {} : { dimColor: true }
   }
 
   if (cell.glyph === SHADE) {
-    return { backgroundColor: TRACK, color: cell.color }
+    return { color: cell.color }
   }
 
   return { backgroundColor: cell.color, color: cell.isWord === true ? WORD : cell.color }
@@ -2329,7 +2330,7 @@ function runsOf(Text: Text, cells: Cell[]): RenderElement[] {
       const paint = paintOf(from)
       const next = to ? paintOf(to) : null
 
-      if (next === null || next.backgroundColor !== paint.backgroundColor || next.color !== paint.color) {
+      if (next === null || next.backgroundColor !== paint.backgroundColor || next.color !== paint.color || next.dimColor !== paint.dimColor) {
         runs.push(Text({ ...paint, children: cells.slice(start, i).map(cell => cell.glyph).join('') }))
         start = i
       }

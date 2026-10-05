@@ -59,15 +59,16 @@ model and the steps stand over the context bar, and the cost is the session's to
 **The limit bars** are one bar for each window your account reports, each with what is left written in
 it: `5h limit · 75% left · Resets in 3h 32m`, `Week limit · 38% left · Resets in 5d 0h`. The coloured
 part is what is *left*, so the bar drains as you use the window: green above half, amber down to a fifth,
-red below. What is gone is black, and the words over it white, whatever your theme. Where the bar is
-short, what it says is shorter (`5h limit · 75% left`).
+red below. What is gone has no colour of its own: it is a faint shade, and the words over it are your
+terminal's ordinary text, so it reads on a light terminal and on a dark one. Where the bar is short,
+what it says is shorter (`5h limit · 75% left`).
 
 An account billed by the API has no such window. It gets the month's spend instead: a bar that grows
 toward the next round figure (`Month · $612.40 spent · Bar full at $1,000.00`) or, once you give it a
 budget, drains that (`Month budget · $7,388.00 left of $8,000.00`).
 
 **The context bar** is the room there is before Claude Code compacts. What is in use comes first, one
-colour for each category; what is free is black. So a full bar means compaction is due. (Claude Code
+colour for each category; what is free is a faint shade. So a full bar means compaction is due. (Claude Code
 keeps a buffer at the end of the window for that compaction. It is no room of yours, and is not drawn.)
 
 *Messages* is the conversation itself: your prompts, Claude's replies and thinking, every tool call and
@@ -361,8 +362,9 @@ it sends nothing of yours anywhere.
 - While nothing runs the band is drawn again once a minute, so the reset times keep moving. The line
   turns only while something runs.
 - A bar is drawn as a solid band of colour, so it is one height along its length and the words in a limit
-  bar sit inside it. What is free or gone is black, with white words over it, on any theme. A copy of the
-  band still carries block characters for it.
+  bar sit inside it. What is free or gone is a faint shade in your terminal's own text colour, with no
+  colour of the mod's choosing, so it reads whatever your theme. A copy of the band still carries block
+  characters for it.
 - The `[-]` beside the band collapses it; `/penny-patrol` hides it.
 - The jokes and stories read from the web are other people's: icanhazdadjoke.com, JokeAPI, and the
   seven outlets named above, each story in the outlet's own words with a link to it. The notes that come with
