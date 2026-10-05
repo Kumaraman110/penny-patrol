@@ -4,9 +4,12 @@ Meters above your Claude Code prompt: how full the context window is, who spent 
 and what is left of your limits. A small mascot walks them while Claude works, and a line under them has
 something worth a glance: an AI tip, a joke, a piece of good news, or a suggestion from your own figures.
 
-![Penny Patrol above the prompt: four bars one under another (the five-hour limit, the context, the cost, the week's limit), each limit bar saying what is left inside the bar, the mascot standing on the first of them in its colour, a line beside each bar, and under them a line of good news with its link](docs/preview.png)
+![Penny Patrol above the prompt: four bars one under another (the five-hour limit, the context, the cost, the week's limit), each limit bar saying what is left inside the bar, the mascot standing on one of them in its colour, a line beside each bar, and under them a line of good news with its link](docs/preview.png)
 
 *The mod's own drawing, rendered outside a terminal for this page. Your terminal's theme sets the colours.*
+
+The mascot's face says how things are: `^__^` while Claude works, `-__-` when it stops, `$__$` as it
+crosses the cost bar, `>__<` when a limit is nearly gone.
 
 An unofficial community mod for Claude Code. Not affiliated with Anthropic.
 
@@ -20,6 +23,10 @@ claude plugin install penny-patrol@penny-patrol
 ```
 
 Start `claude`. The band is above the prompt.
+
+The line under the bars reads a few public feeds for its jokes and news unless you tell it not to:
+`/penny-patrol lines offline` keeps it to what came with the mod. [The web](#the-line) says which
+feeds, and what is and is not sent.
 
 To try it once without installing anything:
 
@@ -147,9 +154,9 @@ politics and the outlets' notes about themselves are left out. No model writes t
 the outlet's own words, and nothing read from a feed is ever given to the model.
 
 **`For you`** comes every five to ten prompts and holds the line through four minutes of work (and
-for as long as nothing runs, so it is there when you look up). It is the most
-pressing thing the session's figures have to say that it has not said yet, and it says what to do and,
-in your own figures, what doing it would move:
+for as long as nothing runs, so it is there when you look up). It is the most pressing thing the
+session's figures have to say that it has not said yet, and it says what to do and, in your own
+figures, what doing it would move:
 
 - the window is four fifths full: how much of it is messages, and where the bar would fall after
   `/compact`;
@@ -186,7 +193,7 @@ It sees the size of your prompts and how the turns went, never their words.
 
 **The web.** Unless you tell it otherwise, the line reads thirteen public feeds, in the background,
 when what it has is an hour old; what they give is kept for every session on the machine. (One read
-brings well over a hundred notes: more than a working day of lines.) The requests are plain reads made
+brings over a hundred notes: about a working day of lines.) The requests are plain reads made
 through Claude Code's own fetch, so your organisation's web-fetch policy applies to them, and they send
 nothing from your session: no prompt, no usage, no file. The hosts are `raw.githubusercontent.com`,
 `the-decoder.com`, `techcrunch.com`, `www.theverge.com`, `icanhazdadjoke.com`, `v2.jokeapi.dev`,
@@ -209,7 +216,7 @@ other; each answers at once and none of them sends a request to the model.
 | Command | What it does |
 | --- | --- |
 | `/penny-patrol` | Hide the band, or show it again. This session only; the choice is remembered. |
-| `/penny-patrol costs` | Print the ledger: the whole session, whatever window of your plan it was spent in. Every prompt, what it cost, the tokens that explain it, and the hourly rate while working; what each window's figure on the band is; and what every session on this machine adds up to: steps and spend by day, week, month and year. |
+| `/penny-patrol costs` | Print the ledger: the whole session, whatever window of your plan it was spent in. Every prompt, what it cost, the tokens that explain it, and the hourly rate while working; what each window's figure on the band is, and the plan's month's; and what every session on this machine adds up to: steps and spend by day, week, month and year. |
 | `/penny-patrol audit` | Check the figures against each other and against what Claude Code reports. |
 | `/penny-patrol budget` | Say what the month's budget is. |
 | `/penny-patrol budget <dollars>` | Set the month's budget, for example `/penny-patrol budget 8000`. `$8,000` works too. Every session on this machine takes it up. |
@@ -222,8 +229,8 @@ other; each answers at once and none of them sends a request to the model.
 | `/penny-patrol lines offline` | The line says only what came with the mod. Nothing is read from the web. |
 | `/penny-patrol lines off` | No line. |
 
-The choice of `lines`, like the budget, is the machine's: every session on it takes it up within half a
-minute. Anything else after `/penny-patrol` prints this list in one line.
+The choice of `lines`, like the budget and the day your plan renews on, is the machine's: every session
+on it takes it up within half a minute. Anything else after `/penny-patrol` prints this list in one line.
 
 **`/penny-patrol costs`** prints:
 
@@ -329,7 +336,7 @@ own ledger, their own counters and their own choice to hide the band.
 
 | On the band | Whose it is |
 | --- | --- |
-| `Model`, `Steps`, `Context`, `Cost` | this session's: the cost in each window is what *this* session spent in it |
+| `Model`, `Steps`, `Context`, `Cost` | this session's: the cost in each window, and in the plan's month, is what *this* session spent in it |
 | the `5h` and `Week` bars | your account's: every session shows the newest reading any of them saw, within five seconds |
 | the `Month` bar (API billing) | every session's on this machine, as is the budget you set |
 | the line | what the feeds gave is the machine's, read once for all its sessions; the order of the notes and the `For you` suggestions are each session's own |
