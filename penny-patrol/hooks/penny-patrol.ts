@@ -1,34 +1,40 @@
 // Penny Patrol: meters above the prompt, a mascot that walks them while the session works, and under
 // them a line with something worth a glance.
 //
-// THE CONTEXT BAR: the window as a stacked bar, one colour per category as /context breaks it down. What
-// is in use comes first, then the free space, then the autocompact buffer at the window's end, so the
-// free run is the room left before compaction.
+// THE CONTEXT BAR: the room there is before Claude Code compacts, as a stacked bar: what is in use, one
+// colour per category as /context breaks it down, then what is free. (The autocompact buffer at the
+// window's end is no room, and is not drawn: the bar is full when compaction is due.)
 //
 // THE COST BAR: who spent this session's dollars. Claude Code reports ONE figure, the session's total.
 // The ledger looks at it at every turn start, tool call and turn end, and books each rise to whoever was
 // acting when it was seen: the main conversation's current prompt, or a subagent (whose spend belongs to
 // the prompt that started it). So the entries always add up to the total, to the cent. What was spent
 // before the ledger first looked is "before tracking": it cannot be itemised, so it is said, not drawn.
+// Where the account has limit windows, the band's cost is what was spent in each of them (the bar is the
+// first one's), and begins again when its window does; the whole session stays in the ledger.
 //
 // THE LIMIT BARS: what is LEFT of each window the account reports (five hours, the week, a spend limit),
 // draining as it is used: a bar each, with what it says written in the bar. An account billed by the API
 // has no such window; it gets the month's spend instead, draining a budget when one is set and growing
 // when not.
 //
-// THE SCENE AND THE READOUT: the bars stand at the left, one under another, two free rows over each; what
-// the context and cost bars have to say is at the right, a line a row. The free rows are the mascot's: it
-// stands on a bar, and while anything runs (a turn, or a background shell or subagent) it takes a step a
-// second, along the first bar, down, back along the second, down, and so to the last, and then the whole
-// way back. It takes the colour of the part of the bar under it, and its face says how things are there.
+// THE SCENE AND THE READOUT: the bars stand at the left, one under another, two free rows over each: a
+// limit window first, then the context and the cost, then the other limits. Beside each is a line: the
+// model beside the first limit, the steps beside the next, and what the context and cost bars have to
+// say beside and under them. The free rows are the mascot's: it stands on a bar, and while anything runs
+// (a turn, or a background shell or subagent) it takes a step a second, along the first bar, down, back
+// along the second, down, and so to the last, and then the whole way back. It takes the colour of the
+// part of the bar under it, and its face says how things are there.
 // Steps are kept by day, so they add up to the week (from Sunday), the month and the year: this session's
 // on the band, every session's on this machine in the ledger.
 //
-// THE LINE: one row under the bars, another each time the mascot has walked a bar's length. By turns it
-// says something about AI (a tip, a fact, what is new), a joke, a piece of good news; and every five to
-// ten prompts, a suggestion drawn from this session's own figures. What it says comes with the mod and,
-// unless told otherwise (/penny-patrol lines), from a handful of public feeds read a few times a day and
-// kept in the folder below. What is read from a feed is only ever drawn: none of it reaches the model.
+// THE LINE: one row under the bars, another every four minutes. By turns it says something about AI (a
+// tip, a fact, what is new), a joke, a piece of good news; and every five to ten prompts, a suggestion
+// drawn from this session's own figures, which says what taking it would move, and says so again when it
+// has moved. What the line says comes with the mod and, unless told otherwise (/penny-patrol lines), from
+// a handful of public feeds read every hour and kept in the folder below: of a story, the gist its own
+// summary gives and its link, never its headline. What is read from a feed is only ever drawn: none of
+// it reaches the model.
 //
 // WHAT IS WHOSE: a session's ledger, days and choices are its own (sessions/, days/ under the folder
 // below, one file a session, written by that session alone), and so is everything the band says of the
@@ -73,7 +79,16 @@ type Ledger = {
   nextSeq: number
   turns: Turn[]
   agents: Record<string, AgentNote>
+  // All that the main conversation, and all that its subagents, were seen spending, whatever was folded
+  // since. (A ledger kept before this was counted has it worked out: see spentOf.)
+  spent?: { main: number; agents: number }
+  // The plan's windows as this session met them, by their kind.
+  marks?: Record<string, Mark>
 }
+// What the session had spent when it met a window of the plan (in all, and by the main conversation and
+// by its subagents): what it spends from there is that window's. `resetsAt` (null with none told, or once
+// it has passed) and `used` tell the window from the one after it.
+type Mark = { resetsAt: string | null; used: number; usd: number; main: number; agents: number }
 // Steps and dollars of one local day, by its date ("2026-10-04").
 type Day = { steps: number; usd: number }
 type Days = Record<string, Day>
@@ -93,7 +108,8 @@ type Cell = { glyph: string; color: string | undefined; isDim: boolean; isTight:
 type Part = { name: string; weight: number; glyph: string; color: string; isDim: boolean; isTight?: boolean }
 // A limit bar, and what is written in it: its title, then what is left, at length or `short` where that
 // does not fit.
-type Gauge = { name: string; title: string; parts: Part[]; label: string; short: string }
+// `isWindow`: a window the account reports (five hours, the week), not the month's spend.
+type Gauge = { name: string; title: string; parts: Part[]; label: string; short: string; isWindow: boolean }
 // A piece of text drawn one way, and a line of the readout: its label, then what it says.
 type Run = { text: string; color?: string; isDim?: boolean }
 type Line = { label: string; runs: Run[] }
@@ -101,23 +117,30 @@ type Line = { label: string; runs: Run[] }
 type Chip = { glyph: string; color: string | undefined; isDim: boolean; text: string; weight: number }
 // A bar of the scene with its lines: the one beside it, those that must stand in the rows right above
 // it, and what it has to say in the `rows` rows under it. `smiles`: the mascot's own for this bar.
-type Section = { cells: Cell[]; beside: Line; above: Line[]; below: (rows: number) => Line[]; smiles?: string[] }
+// `isLimit`: a limit bar. `isLow`: drawn with no free rows over it (the mascot does not come there).
+type Section = { cells: Cell[]; beside: Line; above: Line[]; below: (rows: number) => Line[]; smiles?: string[]; isLimit?: boolean; isLow?: boolean }
 type Box = ElementConstructor<BoxProps>
 type Text = ElementConstructor<TextProps>
 type Link = ElementConstructor<LinkProps>
 // The line under the bars. A note is something it says: about AI, a joke, good news, or a suggestion for
-// the person at the prompt; `by` is where it was read, `href` where it can be read in full.
+// the person at the prompt; `href` is where it can be read in full. The first three are said by turns.
 type Topic = 'ai' | 'joke' | 'news' | 'you'
-type Note = { topic: Topic; text: string; by?: string; href?: string }
+type Pile = Exclude<Topic, 'you'>
+type Note = { topic: Topic; text: string; href?: string }
 // Where the line reads from: the feeds too, what came with the mod alone, or nowhere (no line).
 type LineMode = 'live' | 'offline' | 'off'
 // What the feeds gave, and when.
 type Fresh = { at: number; notes: Note[] }
 type Feed = { url: (pick: () => number) => string; headers?: Record<string, string>; most: number; read: (body: string) => Note[] }
 // A prompt of this session as the suggestions see it: never its words, only its size and how it went.
-type Asked = { seq: number; words: number; chars: number; gapMs: number; isAborted: boolean }
-// A suggestion; `weight` is how much of its kind a turn's end found (the more of it, the more worth saying).
-type Tip = { id: string; text: string; weight?: number }
+// `nth` counts this session's prompts; `seq` is the ledger's number for it.
+type Asked = { nth: number; seq: number; words: number; chars: number; gapMs: number; isAborted: boolean }
+// A suggestion; `weight` is how much of its kind a turn's end found (the more of it, the more worth
+// saying), and `watch` the figure that taking it would move, as it stands.
+type Tip = { id: string; text: string; weight?: number; watch?: { figure: string; was: number } }
+// A figure a suggestion was about, as it stood when the suggestion was made: at the time `at`, at this
+// session's `nth` prompt, the ledger's `seq`, with `usd` spent in all and `agents` of it by subagents.
+type Watch = { figure: string; was: number; at: number; nth: number; seq: number; usd: number; agents: number }
 
 const COMMAND = 'penny-patrol'
 const USAGE = `/${COMMAND} shows or hides the bars. /${COMMAND} costs prints the ledger, /${COMMAND} audit checks the figures, /${COMMAND} budget <dollars|off> sets the month's budget, /${COMMAND} lines <live|offline|off> says where the line under the bars reads from.`
@@ -129,15 +152,21 @@ const SAVE_EVERY_STEPS = 15
 // How often a session looks at what the others wrote: the limits, then (less often) their days.
 const SHARE_EVERY_TICKS = 5
 const SCAN_EVERY_TICKS = 30
+// A window of the plan has begun again when it ends this much later than the one before it or, where no
+// end is told, when this many points less of it are used.
+const RENEWED_MS = 30 * 60_000
+const RENEWED_POINTS = 1
 // A redraw a minute keeps the countdowns moving while nothing else does.
 const REDRAW_EVERY_TICKS = 60
 // Single-width block characters: they line up in every terminal font. A bar's cells are drawn as
 // BACKGROUND (see runsOf), so these are what a copy of the band carries, and only the shade shows.
 const GLYPH: Record<Kind, string> = { used: '█', free: '░', buffer: '▒' }
 const SHADE = '▒'
-// What is free or gone in a bar: the colour behind the person's own messages, a quiet band on any theme;
-// and the colour of words cut out of a part.
-const TRACK = 'userMessageBackground'
+// What is free or gone in a bar is black, and the words over it white, whatever the theme: a theme's own
+// quiet colours are light in a light theme, and the terminal under it may be dark. Words cut out of a
+// part take the theme's colour for text on a colour.
+const TRACK = '#000000'
+const TRACK_WORD = '#ffffff'
 const WORD = 'inverseText'
 const ORDER: Kind[] = ['used', 'free', 'buffer']
 const EMPTY: Cell = { glyph: '░', color: 'inactive', isDim: true, isTight: false }
@@ -180,51 +209,81 @@ const LANES = 2
 const RUNNING_KINDS = new Set(['shell', 'subagent', 'workflow'])
 const WINDOW_NAME: Record<string, string> = { five_hour: '5h', seven_day: 'Week', spend_limit: 'Spend' }
 
-// The line: the cells of its label, the least room worth a line, how many steps a suggestion holds it,
-// and what a note, and the name of where it was read, may be in length. The feeds are read again when what they gave is REFRESH_MS old (a
-// read that gave nothing is tried again after RETRY_MS); a session looks whether it is time every
-// FRESHEN_EVERY_TICKS, and first FIRST_READ_MS after it starts.
-const LINE_LABEL = 11
-const LINE_MIN = 24
-const HOLD_STEPS = 90
+// The line says something else every LINE_MS, and a suggestion holds it that long. A note, the gist of a
+// story (and the least of one worth showing) and a link have their lengths; TOLD_KEPT is how many notes a
+// session remembers having said. The feeds are read again when what they gave is REFRESH_MS old (a read
+// that gave nothing is tried again after RETRY_MS); a session looks whether it is time every
+// FRESHEN_EVERY_TICKS, and first FIRST_READ_MS after it starts. What is kept of a read says in which
+// FORMAT: one kept otherwise is read anew.
+const LINE_MS = 4 * 60_000
 const NOTE_MIN = 12
 const NOTE_MAX = 170
-const NAME_MAX = 40
-const REFRESH_MS = 6 * 3_600_000
+const GIST_MAX = 150
+const GIST_LEAST = 48
+const LINK_MAX = 120
+const TOLD_KEPT = 600
+const REFRESH_MS = 3_600_000
 const RETRY_MS = 30 * 60_000
 const FRESHEN_EVERY_TICKS = 600
 const FIRST_READ_MS = 4_000
+const FORMAT = 2
 // A suggestion comes after COACH_LEAST prompts and up to COACH_SPREAD more, from what the last ASKED_KEPT
-// were like. A break of COLD_GAP_MS is long enough for a prompt cache to have gone cold.
+// were like. A break of COLD_GAP_MS is long enough for a prompt cache to have gone cold. What a suggestion
+// was about is watched for WATCH_PROMPTS prompts, to say so when it has moved. A limit's pace is taken
+// over the last TRAIL_MS of its readings (TRAIL_KEPT of them are kept), once they span PACE_MIN_MS.
 const COACH_LEAST = 5
 const COACH_SPREAD = 6
 const ASKED_KEPT = 12
 const COLD_GAP_MS = 5 * 60_000
+const WATCH_PROMPTS = 40
+// How the line begins when it says that what a suggestion was about has moved.
+const SHOWN = 'It shows: '
+const TRAIL_MS = 3_600_000
+const TRAIL_KEPT = 400
+const PACE_MIN_MS = 15 * 60_000
+// The kinds of note the line says by turns.
+const ROUND: Pile[] = ['ai', 'joke', 'news']
 const TOPIC: Record<Topic, { label: string; color: string }> = {
   ai: { label: 'AI', color: 'permission' },
   joke: { label: 'Joke', color: 'claude' },
   news: { label: 'Good news', color: 'success' },
   you: { label: 'For you', color: 'warning' },
 }
-const INTRO = `This line also reads a few public feeds for fresh jokes, AI news and good news. /${COMMAND} lines offline keeps it to what came with the mod.`
-const CHANGELOG_PAGE = 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md'
-// A headline is about AI when it says so; one that is grim is no one's good news, and a feed's notes about
-// itself are not news. Changelog entries about the plumbing are left to those who need them.
-const ABOUT_AI = /\b(AI|A\.I\.|LLMs?|GPT|Claude|Anthropic|OpenAI|Gemini|Copilot|agents?|chatbots?|neural|transformers?)\b/i
-const GRIM = /\b(dead|deaths?|dies|died|dying|kill(s|ed|ing|er)?|wars?|shoot(s|ing)?|shot|attack(s|ed)?|suicides?|murder(s|ed)?|abuse[ds]?|rape[ds]?|terror\w*|bomb(s|ed|ing)?|genocide|hostages?|tragedy|tragic|fatal\w*|victims?|crash(es|ed)?|disasters?|lawsuits?|sue[ds]?|quits?|fired|layoffs?|scams?|fraud|broken|sad|risks?|ban(s|ned)?|leak(s|ed)?|breach(es|ed)?|hack(s|ed)?|worst|fail(s|ed|ure)?|wip(e[sd]?|ing) out|doom\w*|extinct\w*|threat\w*|danger\w*|rogue|fear\w*|warn\w*|cris[ei]s|collaps\w*|bubble|backlash|outrage\w*|harm\w*|toxic|addict\w*|surveillance|spy(ing)?|stole|steal(s|ing)?|theft|plagiar\w*|misinformation|deepfakes?)\b/i
-const ABOUT_ITSELF = /good news in history|podcast|newsletter|what we.re reading|^gallery|quiz|sponsor|subscribe|giveaway|horoscope|astrology|crossword/i
+const INTRO = `This line also reads a few public feeds, every hour, for fresh jokes, AI news and good news. /${COMMAND} lines offline keeps it to what came with the mod.`
+const CHANGELOG_PAGE = 'https://code.claude.com/docs/en/changelog'
+// A story that is grim is no one's good news, one about politics is not for a line everyone at the desk
+// reads, and a feed's notes about itself are not news. Changelog entries about the plumbing are left to
+// those who need them.
+const HEATED = /\b(trump|biden|elections?|senat(e|ors?)|congress\w*|democrat\w*|republican\w*|impeach\w*|white house|administration|lawmakers?|politic\w*)\b/i
+const GRIM = /\b(dead|deaths?|dies|died|dying|kill(s|ed|ing|er)?|wars?|shoot(s|ing)?|shot|attack(s|ed)?|suicides?|murder(s|ed)?|abuse[ds]?|rape[ds]?|terror\w*|bomb(s|ed|ing)?|genocide|hostages?|tragedy|tragic|fatal\w*|victims?|crash(es|ed)?|disasters?|lawsuits?|sue[ds]?|quits?|fired|layoffs?|scams?|fraud|broken|sad|risks?|ban(s|ned)?|leak(s|ed)?|breach(es|ed)?|hack(s|ed)?|worst|fail(s|ed|ure)?|wip(e[sd]?|ing) out|doom\w*|extinct\w*|threat\w*|danger\w*|rogue|fear\w*|warn\w*|cris[ei]s|collaps\w*|bubble|backlash|outrage\w*|harm\w*|toxic|addict\w*|surveillance|spy(ing)?|stole|steal(s|ing)?|theft|plagiar\w*|misinformation|deepfakes?|crackdowns?|arrest(s|ed)?|smuggl\w*|antitrust|slammed|harass\w*|resign\w*|slop)\b/i
+const ABOUT_ITSELF = /good news in history|podcast|transcript|newsletter|roundup|webinar|what we.re reading|^gallery|quiz|sponsor|subscribe|sign up|giveaway|horoscope|astrology|crossword|techcrunch disrupt|startup battlefield|register now|save up to/i
 const PLUMBING = /\$\.|plugin|\bmods?\b|opentelemetry|managed setting|environment variable|\bsdk\b|\.mcpb|bedrock|vertex|foundry/i
 // Jokes at the expense of what people are, believe or suffer are not for a line everyone at the desk reads.
 const NOT_FUNNY = /\b(yo mama|your mom|blind|deaf|cripple\w*|wheelchair|retard\w*|autis\w*|god|jesus|christ|atheis\w*|religio\w*|pope|priest|nun|muslim|islam\w*|christian\w*|jew\w*|bible|sex\w*|bra|boobs?|naked|nude|gay|lesbian|suicide|cancer|rape\w*|nazi\w*|hitler|slave\w*|race|racis\w*)\b/i
-const ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
+const ENTITY: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '...', mdash: ' - ', ndash: ' - ', rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"' }
+// What cannot stand for its story. A sentence that opens like NOT_A_GIST, or says anything like SELF, is
+// about the page or the outlet; one that opens
+// like LEANS leans on the headline or (LEANS_LATER, for any but the first) on the sentence before it; one
+// that opens like SCENE only sets a scene, unless there is a figure in it; and one that opens like
+// SUBORDINATE and was cut short by its feed may not have got to its point.
+const NOT_A_GIST = /^(welcome|today,? i|sign up|learn how|register|watch|here are|here's what|subscribe|listen|episode|this week|in this|join us|read more|click|photo|image|credit|tell us|meet the|the full |on equity|we discuss)/i
+const SELF = /\b(sponsored by|supported by|our (newsletter|podcast|sponsors?)|sign up (for|to)|subscribe to)\b/i
+const LEANS = /^(this|that|these|those|it|its|it's|they|he|she|such|so much for|here|we|we're|i|our|my)\b/i
+const LEANS_LATER = /^(the|but|and|so|their|his|her|new|one)\b/i
+const SCENE = /^(think about|imagine|picture|there's|there (is|are|was|were)|every |if you|have you|we all|you |let's|once upon|sometimes|for (many|most|years|decades))/i
+const SUBORDINATE = /^(after|as|when|while|although|though|since|just after|before|during|following|despite|because)\b/i
+// A stop after one of these ends no sentence.
+const ABBREVIATED = /^(?:[A-Za-z]|Mr|Mrs|Ms|Dr|Prof|Sen|Rep|Gov|Lt|Gen|Col|Sgt|St|Jr|Sr|vs|etc|Inc|Corp|Co|Ltd|No|U[.]S|U[.]K|E[.]U|a[.]m|p[.]m|e[.]g|i[.]e)$/
 const FEEDS: Feed[] = [
   { url: () => 'https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md', headers: { Range: 'bytes=0-60000' }, most: 8, read: newInClaudeCode },
-  { url: () => 'https://hn.algolia.com/api/v1/search_by_date?query=AI%20LLM%20Claude%20GPT%20Anthropic%20OpenAI&optionalWords=AI%2CLLM%2CClaude%2CGPT%2CAnthropic%2COpenAI&restrictSearchableAttributes=title&tags=story&numericFilters=points%3E120&hitsPerPage=40', most: 12, read: headlines },
+  { url: () => 'https://the-decoder.com/feed/', most: 10, read: body => stories('ai', 'the-decoder.com', false, body) },
+  { url: () => 'https://techcrunch.com/category/artificial-intelligence/feed/', most: 8, read: body => stories('ai', 'techcrunch.com', false, body) },
+  { url: () => 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', most: 8, read: body => stories('ai', 'theverge.com', true, body) },
   { url: pick => `https://icanhazdadjoke.com/search?limit=30&page=${1 + Math.floor(pick() * 20)}`, headers: { Accept: 'application/json' }, most: 30, read: dadJokes },
   { url: () => 'https://v2.jokeapi.dev/joke/Programming?safe-mode&amount=10', most: 10, read: codeJokes },
-  { url: () => 'https://www.goodnewsnetwork.org/feed/', most: 14, read: body => goodNews('Good News Network', 'goodnewsnetwork.org', body) },
-  { url: () => 'https://reasonstobecheerful.world/feed/', most: 8, read: body => goodNews('Reasons to be Cheerful', 'reasonstobecheerful.world', body) },
-  { url: () => 'https://www.optimistdaily.com/feed/', most: 8, read: body => goodNews('The Optimist Daily', 'optimistdaily.com', body) },
+  { url: () => 'https://www.positive.news/feed/', most: 10, read: body => stories('news', 'positive.news', false, body) },
+  { url: () => 'https://www.goodnewsnetwork.org/feed/', most: 16, read: body => stories('news', 'goodnewsnetwork.org', true, body) },
+  { url: () => 'https://www.optimistdaily.com/feed/', most: 8, read: body => stories('news', 'optimistdaily.com', true, body) },
 ]
 // What comes with the mod. The commands and keys named here were checked against Claude Code 2.1.289.
 const AI_NOTES = [
@@ -347,13 +406,19 @@ let ticks = 0
 let strides = 0
 let unsavedSteps = 0
 // The line: where it reads from and whether its feeds have been owned up to (both the machine's, in
-// settings.json), what the feeds last gave and when they were last asked, and the order this session says
-// its notes in. A pinned note holds the line until the mascot has taken `until` steps.
+// settings.json), what the feeds last gave and when they were last asked. `deck` is what this session has
+// to say, kind by kind, in its own order; `told`, what it has said; `shown`, what it says this turn. A
+// turn is LINE_MS long, counted from `lineFrom`; a pinned note holds the line until the time `until`.
+// `lineShown` is what the line was saying at the last tick, to draw it again when that changes.
 let lineMode: LineMode = 'live'
 let isIntroduced = false
 let fresh: Fresh | null = null
 let triedAt = 0
-let deck: Note[] = []
+let deck: Record<Pile, Note[]> = { ai: [], joke: [], news: [] }
+let told: string[] = []
+let shown: { turn: number; note: Note } | null = null
+let lineFrom = 0
+let lineShown = ''
 let pinned: { note: Note; until: number } | null = null
 // The suggestions: this session's own dice, its prompts as they see them (newest last), when the last
 // turn ended, and the prompt the next suggestion is due at. `said` are the ones made since all there was
@@ -366,6 +431,13 @@ let endedAt = 0
 let coachAt = COACH_LEAST
 let said: string[] = []
 let noted: Tip[] = []
+// What the suggestions made were about, watched to say when it has moved; and how far each limit window
+// was used, reading by reading, for the pace it is going at.
+let watches: Watch[] = []
+let trail: Record<string, Array<{ at: number; used: number }>> = {}
+// What has made the conversation shorter since a suggestion about the context was last made: /compact,
+// the engine's own compaction, or /clear. Null while nothing has: the figure moving by itself shows nothing.
+let eased: string | null = null
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -385,7 +457,7 @@ export const register: Register = on => {
     // Said once on a machine, the first time the line is live: that it reads the web, and how to stop it.
     if (lineMode === 'live' && !isIntroduced && folder !== '') {
       isIntroduced = true
-      pinned = { note: { topic: 'you', text: INTRO }, until: strides + HOLD_STEPS }
+      hold({ topic: 'you', text: INTRO })
       await settle($)
     }
 
@@ -455,6 +527,7 @@ export const register: Register = on => {
       }
 
       noteTurn()
+      prove()
     } else if (ledger) {
       const note = noteFor(ledger, e.agentId)
 
@@ -521,10 +594,22 @@ export const register: Register = on => {
   on('session.end', ($, e, next) => {
     if (e.reason === 'clear') {
       reading = null
+      eased = watches.some(watch => watch.figure === 'context') ? '/clear' : null
       $.ui.invalidate('ui.render')
     }
 
     return next(e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+
+    // The main conversation made shorter (not a subagent's, and not a compaction only worked out ahead).
+    if (e.agentId === undefined && e.trigger !== 'precompute' && result.skip === undefined) {
+      eased = e.trigger === 'manual' ? '/compact' : 'compaction'
+    }
+
+    return result
   })
 
   on('command.run', { command: COMMAND }, async ($, e) => {
@@ -568,6 +653,7 @@ export const register: Register = on => {
           await freshen($)
         }
 
+        shown = null
         shuffle()
         $.ui.invalidate('ui.render')
       }
@@ -598,7 +684,7 @@ export const register: Register = on => {
 
     const { Box, Text, Link } = $.ui.resolve(e)
 
-    return band(Box, Text, Link, reading, e.props.bodyColumns, e.props.maxRows)
+    return band(Box, Text, Link, reading, e.props.bodyColumns, e.props.maxRows, e.surface === 'terminal')
   })
 }
 
@@ -615,6 +701,19 @@ function tick($: EngineInterface): void {
 
   if (ticks % FRESHEN_EVERY_TICKS === 0) {
     void freshen($).catch(() => undefined)
+  }
+
+  // The line is drawn again when its four minutes are up, or a suggestion's. (What it says at the first
+  // tick is what it was drawn saying.)
+  const saying = pinned !== null && nowMs < pinned.until ? `held ${pinned.until}` : `turn ${turnOf()}`
+
+  if (saying !== lineShown) {
+    const isChanged = lineShown !== ''
+    lineShown = saying
+
+    if (isChanged && !isHidden && lineMode !== 'off') {
+      $.ui.invalidate('ui.render')
+    }
   }
 
   if (!isMainWorking && background === 0) {
@@ -676,6 +775,9 @@ async function takeReading($: EngineInterface): Promise<void> {
     memory: loadOf(breakdown.memoryFiles.map(file => ({ name: file.path.split(/[\\/]/).at(-1) ?? file.path, tokens: file.tokens }))),
     mcp: loadOf([...servers].map(([name, tokens]) => ({ name, tokens }))),
   }
+  prove()
+  // What made the conversation shorter has had its reading: a later one is not its doing.
+  eased = null
   $.ui.invalidate('ui.render')
 }
 
@@ -707,7 +809,15 @@ async function book($: EngineInterface, agentId: string | null): Promise<void> {
     endedAt = 0
     said = []
     noted = []
-    pinned = null
+    // What a suggestion said of the context is still to be shown when /clear was the answer to it; and
+    // what the line has just shown of it stays its four minutes.
+    watches = watches.filter(watch => watch.figure === 'context').map(watch => ({ ...watch, nth: 0, seq: 0 }))
+    eased = watches.length > 0 ? '/clear' : null
+    pinned = pinned !== null && pinned.note.text.startsWith(SHOWN) ? pinned : null
+    told = []
+    shown = null
+    lineFrom = nowMs
+    lineShown = ''
     coachAt = COACH_LEAST + Math.floor(chance() * COACH_SPREAD)
     shuffle()
   }
@@ -724,9 +834,11 @@ async function book($: EngineInterface, agentId: string | null): Promise<void> {
 
   if (ledger === null || cost.usd < ledger.seen - 0.005) {
     // The first look at this count: nothing spent so far can be itemised.
-    ledger = { seen: cost.usd, untracked: cost.usd, folded: { usd: 0, prompts: 0 }, steps: 0, nextSeq: 1, turns: [], agents: {} }
+    ledger = { seen: cost.usd, untracked: cost.usd, folded: { usd: 0, prompts: 0 }, steps: 0, nextSeq: 1, turns: [], agents: {}, spent: { main: 0, agents: 0 } }
   }
 
+  // Before the rise is booked: a window met in this look begins at what was spent until now.
+  markWindows()
   const rise = cost.usd - ledger.seen
 
   if (rise <= 0) {
@@ -742,12 +854,16 @@ async function book($: EngineInterface, agentId: string | null): Promise<void> {
     ledger.turns.push(current)
   }
 
+  const spent = spentOf(ledger)
+
   if (agentId === null) {
     current.main += rise
+    spent.main += rise
   } else {
     const home = noteFor(ledger, agentId).home
     const turn = ledger.turns.find(candidate => candidate.seq === home) ?? current
     turn.agents[agentId] = (turn.agents[agentId] ?? 0) + rise
+    spent.agents += rise
   }
 
   // The oldest prompts fold into one figure so the saved ledger stays small.
@@ -776,7 +892,10 @@ async function noteLimits($: EngineInterface, windows: readonly SessionRateLimit
   // Stamped with the host's time, not the tick's: the newest stamp is the reading every session shows.
   nowMs = await $.clock.now()
   limits = { at: nowMs, windows: [...windows] }
+  noteTrail()
+  markWindows()
   await keep($, 'limits.json', limits)
+  prove()
   $.ui.invalidate('ui.render')
 }
 
@@ -793,6 +912,7 @@ async function catchUp($: EngineInterface, isScan: boolean): Promise<void> {
 
   if (isLimits(seen) && (limits === null || seen.at > limits.at)) {
     limits = seen
+    noteTrail()
   }
 
   let isChanged = false
@@ -805,6 +925,7 @@ async function catchUp($: EngineInterface, isScan: boolean): Promise<void> {
 
     if (mode !== lineMode) {
       lineMode = mode
+      shown = null
       shuffle()
       isChanged = true
     }
@@ -824,7 +945,10 @@ async function catchUp($: EngineInterface, isScan: boolean): Promise<void> {
     }
   }
 
-  if (isChanged || before !== JSON.stringify([limits, budget])) {
+  // A window that has run out begins again there and then.
+  const isMarked = markWindows()
+
+  if (isMarked || isChanged || before !== JSON.stringify([limits, budget])) {
     $.ui.invalidate('ui.render')
   }
 }
@@ -882,7 +1006,7 @@ async function freshen($: EngineInterface): Promise<void> {
   }
 
   fresh = { at: nowMs, notes }
-  await keep($, 'lines.json', fresh)
+  await keep($, 'lines.json', { format: FORMAT, ...fresh })
   shuffle()
   $.ui.invalidate('ui.render')
 }
@@ -916,6 +1040,70 @@ async function keep($: EngineInterface, name: string, value: unknown): Promise<v
   if (folder !== '') {
     await $.fs.write(`${folder}/${name}`, JSON.stringify(value))
   }
+}
+
+// All that the main conversation and its subagents were seen spending. A ledger kept before this was
+// counted has it worked out from its prompts, what was folded counting as the main conversation's.
+function spentOf(money: Ledger): { main: number; agents: number } {
+  const spent = money.spent ?? {
+    main: money.turns.reduce((sum, turn) => sum + turn.main, money.folded.usd),
+    agents: money.turns.reduce((sum, turn) => sum + Object.values(turn.agents).reduce((all, usd) => all + usd, 0), 0),
+  }
+  money.spent = spent
+
+  return spent
+}
+
+// Marks, for each window of the plan, where this session's spending stood when it met the window as it
+// now is: one it has not seen before, one that has begun again (it ends later than it did or, where no
+// end is told, less of it is used), and one whose end has passed, which begins again there and then,
+// before the next is reported. True when a mark was set.
+function markWindows(): boolean {
+  if (ledger === null || limits === null) {
+    return false
+  }
+
+  const marks = ledger.marks ?? {}
+  const spent = spentOf(ledger)
+  let isMarked = false
+
+  for (const window of limits.windows) {
+    const mark = marks[window.kind]
+    const ends = window.resetsAt === undefined ? NaN : Date.parse(window.resetsAt)
+    const ended = mark === undefined || mark.resetsAt === null ? NaN : Date.parse(mark.resetsAt)
+    const isOver = !Number.isNaN(ends) && nowMs >= ends
+    const isRenewed = mark === undefined
+      || (isOver && mark.resetsAt === window.resetsAt)
+      || (!isOver && (Number.isNaN(ends) || Number.isNaN(ended) ? window.percentUsed < mark.used - RENEWED_POINTS : ends - ended > RENEWED_MS))
+
+    marks[window.kind] = isRenewed
+      ? { resetsAt: isOver ? null : window.resetsAt ?? null, used: window.percentUsed, usd: ledger.seen, main: spent.main, agents: spent.agents }
+      : { ...mark, used: window.percentUsed, resetsAt: isOver ? mark.resetsAt : window.resetsAt ?? mark.resetsAt }
+    isMarked = isMarked || isRenewed
+  }
+
+  ledger.marks = marks
+
+  return isMarked
+}
+
+// What the session was seen spending in each window of the plan it has a mark for, in whole cents: in
+// all, and by the main conversation and by its subagents, which add up to it.
+function periodsOf(money: Ledger): Array<{ name: string; total: number; main: number; agents: number }> {
+  const spent = spentOf(money)
+
+  return (limits?.windows ?? []).flatMap(window => {
+    const mark = money.marks?.[window.kind]
+
+    if (!mark) {
+      return []
+    }
+
+    const total = Math.max(0, Math.round((money.seen - mark.usd) * 100))
+    const [main = 0, agents = 0] = apportion([Math.max(0, spent.main - mark.main), Math.max(0, spent.agents - mark.agents)], total, 0)
+
+    return [{ name: WINDOW_NAME[window.kind] ?? capital(window.kind.replace(/_/g, ' ')), total, main, agents }]
+  })
 }
 
 // A subagent's note, opened in the prompt that is current when it is first seen.
@@ -992,7 +1180,7 @@ function everyDays(): Days[] {
   return [days, ...[...others.values()].map(other => other.days)]
 }
 
-function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, maxRows: number): RenderElement {
+function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, maxRows: number, isTerminal: boolean): RenderElement {
   // paddingX takes two cells.
   const inner = Math.max(1, columns - 2)
   const money = ledger !== null && ledger.seen > 0 ? ledger : null
@@ -1001,68 +1189,77 @@ function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, m
   const mine = calendar(nowMs, [days])
   const gauges = gaugesOf(calendar(nowMs, everyDays()).month.usd, money !== null)
   const free = now.segments.reduce((sum, segment) => sum + (segment.kind === 'free' ? segment.tokens : 0), 0)
-  // The room before compaction is what is in use and what is free; the buffer is not room.
+  // The bar is the room there is before compaction: what is in use, then what is free. The buffer is no
+  // room, and no part of the bar.
   const isTight = free < (now.used + free) * TIGHT_SHARE
-  const context = now.segments.map(segment => ({ ...partOf(segment), isTight }))
+  const context = now.segments.filter(segment => segment.kind !== 'buffer').map(segment => ({ ...partOf(segment), isTight }))
   const contextFacts = [`${now.percent}%`, `${short(now.used)} / ${short(now.window)}`, free > 0 ? `${short(free)} free` : '']
-  const spend = bill ? spendParts(bill) : []
-  const costFacts = money && bill ? [money$(bill.total), promptOf(money, bill)] : []
+  // With the plan's windows known, the cost is what was spent in each of them and begins again when its
+  // window does; the bar is the first one's. The whole session is the ledger's to say.
+  const periods = money ? periodsOf(money) : []
+  const period = periods[0]
+  const spend = bill ? spendParts(period ? { ...bill, main: period.main, agents: period.agents, folded: 0 } : bill) : []
+  const costFacts = money && bill
+    ? [...(period ? periods.map(each => `${each.name} ${money$(each.total)}`) : [money$(bill.total)]), promptOf(money, bill)]
+    : []
 
   if (inner >= FULL_COLUMNS) {
     const room = Math.min(TEXT_MAX, inner - GAP - Math.floor(inner * TRACK_SHARE))
     const track = inner - GAP - room
     // What a line may say after its label.
     const width = room - LABEL
-    const sections: Section[] = [{
+    const model = lineOf('Model', [now.model, effort === null ? '' : `${capital(effort)} effort`], width, true)
+    const steps = lineOf('Steps', (['today', 'week', 'month', 'year'] as const).map(period => `${capital(period)} ${count(mine[period].steps)}`), width, true)
+    const contextBar: Section = {
       cells: cellsOf(context, track),
       beside: lineOf('Context', contextFacts, width, false),
       above: [],
       below: rows => {
-        // The free run needs no entry: the line beside the bar says what is free. The buffer's is said
-        // only where there is room for it.
-        const chips = (kind: Kind): Chip[] =>
-          now.segments.filter(segment => segment.kind === kind).map(segment => chipOf(partOf(segment), short(segment.tokens)))
+        // The free run needs no entry: the line beside the bar says what is free.
+        const chips = now.segments.filter(segment => segment.kind === 'used').map(segment => chipOf(partOf(segment), short(segment.tokens)))
         const sent = lineOf('', sentOf(now.last), width, true)
         // A legend that fits on one line leaves the other to the last request.
-        const tight = sent.runs.length > 0 && rows > 1
-          ? wrapped([...chips('used'), ...chips('buffer')], width, rows - 1) ?? wrapped(chips('used'), width, rows - 1)
-          : null
+        const tight = sent.runs.length > 0 && rows > 1 ? wrapped(chips, width, rows - 1) : null
 
         return tight
           ? [...tight.map(runs => ({ label: '', runs })), sent]
-          : legendOf(chips('used'), chips('buffer'), width, rows).map(runs => ({ label: '', runs }))
+          : legendOf(chips, [], width, rows).map(runs => ({ label: '', runs }))
       },
-    }]
-
-    if (money && bill) {
-      const before: Chip[] = bill.before > 0
-        ? [{ glyph: '', color: undefined, isDim: true, text: `Before tracking ${money$(bill.before)}`, weight: bill.before }]
-        : []
-      sections.push({
-        cells: cellsOf(spend, track),
-        beside: lineOf('Cost', costFacts, width, false),
-        above: [],
-        below: rows => legendOf(spend.map(part => chipOf(part, money$(part.weight))), before, width, rows).map(runs => ({ label: '', runs })),
-        smiles: COST_SMILES,
-      })
     }
-
-    // A limit bar says what it has to say itself, so no line stands beside it.
-    for (const gauge of gauges) {
-      sections.push({ cells: wordedCells(gauge, track), beside: { label: '', runs: [] }, above: [], below: () => [] })
-    }
-
-    const header = [
-      lineOf('Model', [now.model, effort === null ? '' : `${capital(effort)} effort`], width, true),
-      lineOf('Steps', (['today', 'week', 'month', 'year'] as const).map(period => `${capital(period)} ${count(mine[period].steps)}`), width, true),
+    // What was spent before tracking is no window's.
+    const before: Chip[] = bill && bill.before > 0 && !period
+      ? [{ glyph: '', color: undefined, isDim: true, text: `Before tracking ${money$(bill.before)}`, weight: bill.before }]
+      : []
+    const costBar: Section[] = money && bill
+      ? [{
+          cells: cellsOf(spend, track),
+          beside: lineOf('Cost', costFacts, width, false),
+          above: [],
+          below: rows => legendOf(spend.map(part => chipOf(part, money$(part.weight))), before, width, rows).map(runs => ({ label: '', runs })),
+          smiles: COST_SMILES,
+        }]
+      : []
+    // A limit bar says what it has to say itself, so the line beside it is another's. The first limit
+    // window stands first, the model beside it; the other limits stand last, the steps beside the first
+    // of them (with one window alone, under it). With no window the model and the steps stand over the
+    // first bar.
+    const first = gauges.find(gauge => gauge.isWindow)
+    const rest = gauges.filter(gauge => gauge !== first)
+    const limit = (gauge: Gauge, beside: Line, under: Line[]): Section =>
+      ({ cells: wordedCells(gauge, track), beside, above: [], below: () => under, isLimit: true })
+    const sections: Section[] = [
+      ...(first ? [limit(first, model, rest.length > 0 ? [] : [steps])] : []),
+      contextBar,
+      ...costBar,
+      ...rest.map((gauge, i) => limit(gauge, first && i === 0 ? steps : { label: '', runs: [] }, [])),
     ]
-    // The line says something else each time the mascot has walked a bar's length.
-    const line = lineRow(Box, Text, Link, inner, Math.floor(strides / Math.max(1, track - MASCOT_CELLS + 1)))
+    const header = first ? [] : [model, steps]
+    const line = lineRow(Box, Text, Link, inner, isTerminal)
 
     // With fewer rows than all of it needs, the line gives way first; then the limit bars give up the free
-    // rows over them, and the mascot keeps to the bars above; only then does the scene.
-    for (const low of gauges.length > 0 ? [0, gauges.length] : [0]) {
-      const rows = scene(Box, Text, sections, header, track, low)
+    // rows over them, and the mascot keeps to the other bars; only then does the scene.
+    for (const isLow of gauges.length > 0 ? [false, true] : [false]) {
+      const rows = scene(Box, Text, isLow ? sections.map(section => (section.isLimit === true ? { ...section, isLow: true } : section)) : sections, header, track)
 
       for (const children of line ? [[...rows, line], rows] : [rows]) {
         if (children.length <= maxRows) {
@@ -1079,22 +1276,25 @@ function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, m
 
 // The scene and its readout, row by row: over each bar its two free rows, the mascot in them when it is
 // on that bar; at the right of every row, a line. The lines beside the free rows are what the bar above
-// still has to say (the model and the steps, over the first), then what must stand right above this one.
-// The last `low` bars have no free rows over them: the mascot does not come there, and what the bars
-// above still have to say stands beside them instead.
-function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track: number, low: number): RenderElement[] {
+// still has to say (or, over the first bar, `header`), then what must stand right above this one. A bar
+// drawn low has no free rows over it: the mascot does not come there, and beside it stands its own line
+// or, when it has none, the next the bars above still have to say.
+function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track: number): RenderElement[] {
   const span = track - MASCOT_CELLS
-  const walked = sections.length - low
-  const spot = spotOf(strides, walked, span)
+  const walked = sections.filter(section => section.isLow !== true)
+  const spot = spotOf(strides, walked.length, span)
+  const on = walked[spot.bar]
   const isWalking = isMainWorking || background > 0
   const blank = (cells: number): RenderElement[] => (cells > 0 ? [Text({ children: ' '.repeat(cells) })] : [])
+  const hasLine = (section: Section): boolean => section.beside.label !== '' || section.beside.runs.length > 0
   const rows: RenderElement[] = []
   let waiting = header
 
   sections.forEach((section, i) => {
-    if (i >= walked) {
-      const [line, ...rest] = waiting
-      waiting = rest
+    if (section.isLow === true) {
+      const line = hasLine(section) ? section.beside : waiting[0]
+      // What it has to say under it waits for the next free rows, after what waits already.
+      waiting = [...(hasLine(section) ? waiting : waiting.slice(1)), ...section.below(LANES)]
       rows.push(Box({ flexDirection: 'row', children: [...runsOf(Text, section.cells), ...blank(GAP), ...(line ? written(Text, line) : [])] }))
 
       return
@@ -1107,15 +1307,20 @@ function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track:
     const overhead = sections[i - 1]?.cells.slice(spot.at + 1, spot.at + MASCOT_CELLS - 1) ?? []
 
     lines.forEach((line, lane) => {
-      const left = spot.bar === i
+      const left = section === on
         ? [...blank(spot.at), ...mascotRow(Text, section.cells[spot.at + MASCOT_MIDDLE], overhead, lane, isWalking, section.smiles ?? []), ...blank(span - spot.at + GAP)]
         : blank(track + GAP)
       rows.push(Box({ flexDirection: 'row', children: [...left, ...(line ? written(Text, line) : [])] }))
     })
 
     rows.push(Box({ flexDirection: 'row', children: [...runsOf(Text, section.cells), ...blank(GAP), ...written(Text, section.beside)] }))
+    // What it still has to say has the free rows over the next bar; under a run of low bars, a row for
+    // each of them that has no line of its own.
     const next = sections[i + 1]
-    waiting = section.below(!next ? LANES : i + 1 >= walked ? low : LANES - next.above.length)
+    const after = sections.slice(i + 1)
+    const lows = after.findIndex(later => later.isLow !== true)
+    const beside = after.slice(0, lows < 0 ? after.length : lows).filter(later => !hasLine(later)).length
+    waiting = section.below(!next ? LANES : next.isLow === true ? beside : LANES - next.above.length)
   })
 
   // What the last bar has to say goes under it.
@@ -1198,67 +1403,112 @@ function compact(Box: Box, Text: Text, inner: number, bars: Array<{ parts: Part[
   return rows
 }
 
-// The line as drawn: what kind of note it is, in that kind's colour, then the note; where it was read
-// comes after it when there is room, as a link when it can be read there in full. Null with no line to
-// draw: it is off, or there is no room worth one.
-function lineRow(Box: Box, Text: Text, Link: Link, inner: number, pass: number): RenderElement | null {
-  const room = inner - LINE_LABEL
-
-  if (lineMode === 'off' || room < LINE_MIN) {
-    return null
-  }
-
-  const note = noteAt(pass, room)
+// The line as drawn: what kind of note it is, in that kind's colour, a space, and the note right after
+// it; then, of a story, its link, whole. Null with no line to draw: it is off, or nothing fits.
+function lineRow(Box: Box, Text: Text, Link: Link, inner: number, isTerminal: boolean): RenderElement | null {
+  const note = lineMode === 'off' ? null : noteAt(inner)
 
   if (note === null) {
     return null
   }
 
   const topic = TOPIC[note.topic]
-  const by = note.by !== undefined && note.text.length + 3 + note.by.length <= room ? note.by : ''
+  const text = fitted(note, inner)
 
   return Box({
     flexDirection: 'row',
     children: [
-      Text({ color: topic.color, bold: true, children: topic.label.padEnd(LINE_LABEL) }),
-      Text({ wrap: 'truncate-end', children: note.text }),
-      ...(by === '' ? [] : [Text({ dimColor: true, children: ' · ' }), note.href === undefined ? Text({ dimColor: true, children: by }) : Link({ href: note.href, label: by })]),
+      Text({ color: topic.color, bold: true, children: `${topic.label} ` }),
+      // A note that holds the line is said even where it does not fit: it ends where the band does.
+      Text({ wrap: 'truncate-end', children: text ?? note.text }),
+      // A terminal makes a link of an address it is shown; elsewhere it has to be given one.
+      ...(note.href === undefined || text === null
+        ? []
+        : [Text({ children: ' ' }), isTerminal ? Text({ dimColor: true, children: note.href }) : Link({ href: note.href })]),
     ],
   })
 }
 
-// What the line says on the mascot's `pass`th pass: a pinned note while it holds; else the deck's notes
-// that fit `room`, in turn. With none that fits, the deck's own next one (it is cut short as drawn).
-function noteAt(pass: number, room: number): Note | null {
-  if (pinned !== null && strides < pinned.until) {
+// A note as it fits a line of `inner` cells after its label: whole; or, a story, its gist cut short to
+// leave its link whole. Null when it does not fit.
+function fitted(note: Note, inner: number): string | null {
+  const room = inner - TOPIC[note.topic].label.length - 1 - (note.href === undefined ? 0 : note.href.length + 1)
+
+  if (note.text.length <= room) {
+    return note.text
+  }
+
+  return note.href !== undefined && room >= GIST_LEAST ? cut(note.text, room) : null
+}
+
+// A text at most `most` long: whole, or cut and marked as cut: at the end of a clause when one ends in
+// the last quarter of the room, else at the end of a word, so that as much as can be is kept.
+function cut(text: string, most: number): string {
+  if (text.length <= most) {
+    return text
+  }
+
+  const head = text.slice(0, most - 3)
+  const clause = Math.max(head.lastIndexOf(', '), head.lastIndexOf('; '), head.lastIndexOf(': '), head.lastIndexOf(' - '))
+  const end = clause >= most * 0.75 ? clause : head.lastIndexOf(' ')
+
+  return `${head.slice(0, end > 0 ? end : head.length).replace(/[ ,;:.-]+$/, '')}...`
+}
+
+// What the line says now: a note that holds it; else this turn's, which is the next of its kind (about
+// AI, a joke, good news, by turns) that fits a line of `inner` cells and has not been said. A kind all
+// said starts again; one with nothing that fits gives its turn to the next.
+function noteAt(inner: number): Note | null {
+  if (pinned !== null && nowMs < pinned.until) {
     return pinned.note
   }
 
-  const fitting = deck.filter(note => note.text.length <= room)
-  const from = fitting.length > 0 ? fitting : deck
+  const turn = turnOf()
 
-  return from[pass % Math.max(1, from.length)] ?? null
-}
-
-// The order this session says its notes in: about AI, a joke, good news, by turns, each kind shuffled
-// with the session's own dice. A kind that runs out starts again, until the longest has been through.
-function shuffle(): void {
-  const pick = seeded(seed)
-  const piles: Record<Exclude<Topic, 'you'>, Note[]> = {
-    ai: AI_NOTES.map((text): Note => ({ topic: 'ai', text })),
-    joke: JOKES.map((text): Note => ({ topic: 'joke', text })),
-    news: [],
+  if (shown !== null && shown.turn === turn && fitted(shown.note, inner) !== null) {
+    return shown.note
   }
 
-  for (const note of lineMode === 'live' ? fresh?.notes ?? [] : []) {
-    if (note.topic !== 'you') {
-      piles[note.topic].push(note)
+  for (let i = 0; i < ROUND.length; i += 1) {
+    const kind = ROUND[(turn + i) % ROUND.length]
+    const fitting = (kind === undefined ? [] : deck[kind]).filter(candidate => fitted(candidate, inner) !== null)
+    const note = fitting.find(candidate => !told.includes(candidate.text)) ?? fitting[0]
+
+    if (note) {
+      if (told.includes(note.text)) {
+        told = told.filter(text => !fitting.some(candidate => candidate.text === text))
+      }
+
+      told = [...told, note.text].slice(-TOLD_KEPT)
+      shown = { turn, note }
+
+      return note
     }
   }
 
-  const kinds = [piles.ai, piles.joke, piles.news].filter(pile => pile.length > 0)
+  return null
+}
 
-  for (const pile of kinds) {
+// Which turn of the line it is: another every LINE_MS.
+function turnOf(): number {
+  return Math.max(0, Math.floor((nowMs - lineFrom) / LINE_MS))
+}
+
+// A note that holds the line for a turn of its own: the turns after it begin when it ends.
+function hold(note: Note): void {
+  const turn = turnOf()
+  pinned = { note, until: nowMs + LINE_MS }
+  lineFrom = pinned.until - (turn + 1) * LINE_MS
+}
+
+// What this session has to say, kind by kind: what the feeds gave and what came with the mod, each
+// shuffled with the session's own dice, then one of the one and one of the other by turns, so that what
+// is fresh is not kept for last.
+function shuffle(): void {
+  const pick = seeded(seed)
+  const mixed = (notes: Note[]): Note[] => {
+    const pile = [...notes]
+
     for (let i = pile.length - 1; i > 0; i -= 1) {
       const j = Math.floor(pick() * (i + 1))
       const moved = pile[i]
@@ -1269,9 +1519,23 @@ function shuffle(): void {
         pile[j] = moved
       }
     }
+
+    return pile
+  }
+  const read = lineMode === 'live' ? fresh?.notes ?? [] : []
+  const own: Record<Pile, Note[]> = {
+    ai: AI_NOTES.map((text): Note => ({ topic: 'ai', text })),
+    joke: JOKES.map((text): Note => ({ topic: 'joke', text })),
+    news: [],
+  }
+  const dealt = (kind: Pile): Note[] => {
+    const theirs = mixed(read.filter(note => note.topic === kind))
+    const mine = mixed(own[kind])
+
+    return Array.from({ length: Math.max(theirs.length, mine.length) }, (_, i) => [theirs[i], mine[i]]).flat().filter((note): note is Note => note !== undefined)
   }
 
-  deck = Array.from({ length: Math.max(0, ...kinds.map(pile => pile.length)) }, (_, i) => kinds.flatMap(pile => pile[i % pile.length] ?? [])).flat()
+  deck = { ai: dealt('ai'), joke: dealt('joke'), news: dealt('news') }
 }
 
 // What `/penny-patrol lines` answers: where the line reads from now, and how to have it otherwise.
@@ -1281,7 +1545,7 @@ function linesSaid(isUnknown: boolean): string {
     ? 'The line under the bars is off.'
     : lineMode === 'offline'
       ? 'The line under the bars says only what came with the mod; nothing is read from the web.'
-      : `The line under the bars is live: what came with the mod, and ${fresh === null ? 'nothing read from the feeds yet' : `${count(fresh.notes.length)} notes read from the feeds ${span(Math.max(0, nowMs - fresh.at) / 1000)} ago`}.`
+      : `The line under the bars is live: what came with the mod, and ${fresh === null ? 'nothing read from the feeds yet' : `${count(fresh.notes.length)} notes read from the feeds ${span(Math.max(0, nowMs - fresh.at) / 1000)} ago`}. It says something else every ${LINE_MS / 60_000} minutes; the feeds are read again every ${REFRESH_MS / 60_000}.`
 
   return [
     ...(isUnknown ? ['Say live, offline or off.'] : []),
@@ -1291,7 +1555,8 @@ function linesSaid(isUnknown: boolean): string {
 }
 
 // A prompt as the suggestions see it, and, when one is due, the suggestion: the first of what the
-// figures say that has not been said; when all of it has, the round begins again.
+// figures say that has not been said; when all of it has, the round begins again. The figure it is about
+// is watched from then on (see prove).
 function noteAsk(text: string, seq: number): void {
   const prompt = text.trim()
 
@@ -1299,8 +1564,9 @@ function noteAsk(text: string, seq: number): void {
     return
   }
 
-  asked = [...asked, { seq, words: prompt.split(/\s+/).length, chars: prompt.length, gapMs: endedAt === 0 ? 0 : Math.max(0, nowMs - endedAt), isAborted: false }].slice(-ASKED_KEPT)
   prompts += 1
+  asked = [...asked, { nth: prompts, seq, words: prompt.split(/\s+/).length, chars: prompt.length, gapMs: endedAt === 0 ? 0 : Math.max(0, nowMs - endedAt), isAborted: false }].slice(-ASKED_KEPT)
+  watches = watches.filter(watch => prompts - watch.nth <= WATCH_PROMPTS)
 
   if (lineMode === 'off' || prompts < coachAt) {
     return
@@ -1314,7 +1580,14 @@ function noteAsk(text: string, seq: number): void {
     said = unsaid ? [...said, tip.id] : [tip.id]
     // What a turn's end noted is said once.
     noted = noted.filter(found => found.id !== tip.id)
-    pinned = { note: { topic: 'you', text: tip.text }, until: strides + HOLD_STEPS }
+    hold({ topic: 'you', text: tip.text })
+
+    if (tip.watch) {
+      const { figure, was } = tip.watch
+      watches = [...watches.filter(watch => watch.figure !== figure), { figure, was, at: nowMs, nth: prompts, seq, usd: ledger?.seen ?? 0, agents: ledger ? spentOf(ledger).agents : 0 }]
+      // From here on it is this suggestion that a shorter conversation would answer.
+      eased = figure === 'context' ? null : eased
+    }
   }
 
   coachAt = prompts + COACH_LEAST + Math.floor(chance() * COACH_SPREAD)
@@ -1338,13 +1611,23 @@ function noteTurn(): void {
   const usual = others.reduce((sum, other) => sum + other.amount, 0) / Math.max(1, others.length)
 
   if (row && others.length >= 3 && row.amount >= 100 && row.amount >= usual * 3) {
-    found.push({ id: 'dear', weight: row.amount, text: `One prompt cost ${money$(row.amount)}, ${Math.round(row.amount / Math.max(1, usual))} times what this session's prompts usually do. Point Claude at the files and lines that matter, not the whole tree.` })
+    found.push({
+      id: 'dear',
+      weight: row.amount,
+      text: `One prompt cost ${money$(row.amount)}, ${Math.round(row.amount / Math.max(1, usual))} times this session's usual ${money$(Math.round(usual))}. Point Claude at the files and lines that matter, not the whole tree.`,
+      watch: { figure: 'dear', was: row.amount },
+    })
   }
 
   const recached = turn.tokens.cacheWrite
 
   if (reading && ask.gapMs >= COLD_GAP_MS && recached >= 30_000 && recached >= reading.used * 0.6) {
-    found.push({ id: 'cold', weight: recached, text: `After a ${span(ask.gapMs / 1000)} break, one prompt wrote ${short(recached)} tokens to the prompt cache again. /compact before you step away, and the way back is cheaper.` })
+    found.push({
+      id: 'cold',
+      weight: recached,
+      text: `After a ${span(ask.gapMs / 1000)} break, one prompt wrote ${short(recached)} tokens to the prompt cache again${row && row.amount > 0 ? ` and cost ${money$(row.amount)}` : ''}. /compact before you step away: the way back writes only what is left.`,
+      watch: { figure: 'cold', was: recached },
+    })
   }
 
   for (const tip of found) {
@@ -1356,17 +1639,190 @@ function noteTurn(): void {
   }
 }
 
+// Looks at the figures the suggestions made were about and, when one has moved the way its suggestion
+// meant, says so on the line: one at a time, the oldest first, each once.
+function prove(): void {
+  if (lineMode === 'off') {
+    return
+  }
+
+  for (const watch of watches) {
+    const text = proofOf(watch)
+
+    if (text !== null) {
+      watches = watches.filter(other => other !== watch)
+      hold({ topic: 'you', text: `${SHOWN}${text}` })
+
+      return
+    }
+  }
+}
+
+// What has become of the figure a suggestion was about: said only when it is better than it was, and
+// there has been enough since to tell (of the context: a compaction or /clear). Null otherwise.
+function proofOf(watch: Watch): string | null {
+  const { figure, was } = watch
+  const asks = asked.filter(ask => ask.nth > watch.nth)
+  // A turn still running has not shown how it goes, or what it costs.
+  const ended = isMainWorking ? asks.filter(ask => ask !== asked.at(-1)) : asks
+  const running = isMainWorking ? ledger?.turns.at(-1) : undefined
+  const rows = ledger !== null && ledger.seen > 0 ? billOf(ledger).rows.filter(row => row.turn.seq > watch.seq && row.turn !== running) : []
+
+  if (figure === 'context' || figure === 'mcp' || figure === 'memory') {
+    const now = reading === null ? null : figure === 'context' ? reading.used : figure === 'mcp' ? reading.mcp.tokens : reading.memory.tokens
+
+    // The context is an estimate that moves by itself: it shows something only once the conversation was
+    // in fact made shorter.
+    if (now === null || now >= was || (figure === 'context' && eased === null)) {
+      return null
+    }
+
+    // Figures that round alike are said in full.
+    const [before, after] = short(was) === short(now) ? [count(was), count(now)] : [short(was), short(now)]
+    const less = shareOf(was - now, was)
+
+    return figure === 'context'
+      ? `after ${eased ?? 'that'} the context went from ${before} to ${after} tokens, so every request from here sends ${less} less.`
+      : `${figure === 'mcp' ? 'MCP tools' : 'memory files'} are ${after} tokens of every request now, down from ${before}: ${less} less.`
+  }
+
+  if (figure === 'stopped') {
+    const stopped = ended.filter(ask => ask.isAborted).length
+
+    return ended.length >= 4 && stopped / ended.length < was
+      ? `you stopped ${stopped === 0 ? 'none' : stopped} of the ${ended.length} turns since, against ${Math.round(was * 100)}% of those before.`
+      : null
+  }
+
+  if (figure === 'dear') {
+    const dearest = Math.max(0, ...rows.map(row => row.amount))
+
+    return rows.length >= 4 && dearest < was ? `the dearest of the ${rows.length} prompts since cost ${money$(dearest)}, against ${money$(was)} for that one.` : null
+  }
+
+  if (figure === 'cold') {
+    const back = [...ended].reverse().find(ask => ask.gapMs >= COLD_GAP_MS)
+    const wrote = back === undefined ? undefined : ledger?.turns.find(turn => turn.seq === back.seq)?.tokens.cacheWrite
+
+    return back !== undefined && wrote !== undefined && wrote < was
+      ? `back after ${span(back.gapMs / 1000)}, the prompt wrote ${short(wrote)} tokens to the cache again, against ${short(was)} the time before.`
+      : null
+  }
+
+  if (figure === 'agents') {
+    // By what was spent since, whichever prompt a subagent's spend belongs to.
+    const spent = (ledger?.seen ?? 0) - watch.usd
+    const theirs = ledger ? spentOf(ledger).agents - watch.agents : 0
+
+    return ended.length >= 3 && spent >= 0.01 && theirs / spent < was
+      ? `subagents were ${Math.round((theirs / spent) * 100)}% of the ${dollars(spent)} spent since, against ${Math.round(was * 100)}% before.`
+      : null
+  }
+
+  if (figure === 'terse') {
+    const words = asks.reduce((sum, ask) => sum + ask.words, 0) / Math.max(1, asks.length)
+
+    return asks.length >= 5 && words > was ? `your ${asks.length} prompts since averaged ${Math.round(words)} words, against ${Math.max(1, Math.round(was))} before.` : null
+  }
+
+  if (figure === 'pasted') {
+    const long = asks.filter(ask => ask.chars >= 3_000).length
+
+    return asks.length >= 5 && long / asks.length < was
+      ? `${long === 0 ? 'none' : long} of your ${asks.length} prompts since ${long <= 1 ? 'was' : 'were'} over 3,000 characters, against ${Math.round(was * 100)}% of those before.`
+      : null
+  }
+
+  if (figure.startsWith('limit-')) {
+    const kind = figure.slice('limit-'.length)
+    const pace = paceOf(kind, watch.at)
+    const name = WINDOW_NAME[kind] ?? capital(kind.replace(/_/g, ' '))
+
+    if (pace === null || pace >= was) {
+      return null
+    }
+
+    return pace > 0 ? `the ${name} limit is going at ${rateOf(pace)} an hour now, down from ${rateOf(was)}.` : `the ${name} limit has not moved since, against ${rateOf(was)} an hour before.`
+  }
+
+  return null
+}
+
+// A reading of the limits, added to each window's trail. A window less used than it was has begun again:
+// its trail starts over, and nothing more is to be shown of the one that ended.
+function noteTrail(): void {
+  if (limits === null) {
+    return
+  }
+
+  for (const window of limits.windows) {
+    const samples = trail[window.kind] ?? []
+    const last = samples.at(-1)
+
+    if (last && window.percentUsed < last.used) {
+      trail[window.kind] = [{ at: limits.at, used: window.percentUsed }]
+      watches = watches.filter(watch => watch.figure !== `limit-${window.kind}`)
+    } else if (!last || window.percentUsed > last.used) {
+      trail[window.kind] = [...samples, { at: limits.at, used: window.percentUsed }].slice(-TRAIL_KEPT)
+    }
+  }
+}
+
+// How fast a limit window is going, in points of it an hour, since the time `from` (or since its first
+// reading, when that is later): null until there is PACE_MIN_MS to take it over.
+function paceOf(kind: string, from: number): number | null {
+  const samples = trail[kind] ?? []
+  const base = [...samples].reverse().find(sample => sample.at <= from) ?? samples[0]
+  const last = samples.at(-1)
+
+  if (!base || !last) {
+    return null
+  }
+
+  const since = Math.max(base.at, from)
+
+  return nowMs - since < PACE_MIN_MS ? null : ((last.used - base.used) / (nowMs - since)) * 3_600_000
+}
+
+// 9.46 -> "9.5%", 12.3 -> "12%": points of a limit window an hour.
+function rateOf(pace: number): string {
+  return `${pace >= 10 ? Math.round(pace) : pace.toFixed(1)}%`
+}
+
+// A share as a percentage, to as many places as it takes to show: "12%", "1.4%", "0.03%", "0.004%".
+function shareOf(part: number, whole: number): string {
+  const percent = whole > 0 ? (part / whole) * 100 : 0
+
+  if (percent > 0 && percent < 0.001) {
+    return 'under 0.001%'
+  }
+
+  return `${percent.toFixed(percent >= 10 ? 0 : percent >= 1 ? 1 : percent >= 0.1 ? 2 : 3)}%`
+}
+
 // What this session's own figures suggest, the most pressing first: the window, the limits, what every
 // request carries, how the turns went, what a turn's end noted, where the money went, how the prompts
-// were put. The last is a plain account of the session, so there is always something true to say.
+// were put. Each says what to do and, in this session's own figures, what doing it moves; `watch` is that
+// figure, so that the line can say when it has moved. The last is a plain account of the session, so
+// there is always something true to say.
 function adviceOf(): Tip[] {
   const tips: Tip[] = []
   const recent = asked.slice(-8)
   const bill = ledger !== null && ledger.seen > 0 ? billOf(ledger) : null
   const asks = ledger ? Math.max(prompts, ledger.nextSeq - 1) : prompts
+  // The conversation itself is what /compact shortens and /clear drops: the rest is sent whatever is done.
+  const messages = reading?.segments.find(segment => /^messages$/i.test(segment.name))?.tokens ?? 0
+  const rest = reading ? Math.max(0, reading.used - messages) : 0
+  const context = reading ? { watch: { figure: 'context', was: reading.used } } : {}
 
   if (reading && reading.percent >= 80) {
-    tips.push({ id: 'full', text: `Context is ${reading.percent}% full. /compact now, or /clear if the task has changed: every request sends all ${short(reading.used)} tokens again.` })
+    tips.push({
+      id: 'full',
+      text: messages > 0
+        ? `Context is ${reading.percent}% full, ${short(messages)} of it messages. /compact swaps those for a summary: the bar would fall toward ${Math.round((rest / reading.window) * 100)}%, and every request sends that much less.`
+        : `Context is ${reading.percent}% full: every request sends all ${short(reading.used)} tokens again. /compact now, or /clear if the task has changed.`,
+      ...context,
+    })
   }
 
   for (const window of limits?.windows ?? []) {
@@ -1375,22 +1831,44 @@ function adviceOf(): Tip[] {
 
     if (left <= 25 && until > 30 * 60_000) {
       const name = WINDOW_NAME[window.kind] ?? capital(window.kind.replace(/_/g, ' '))
-      tips.push({ id: `limit-${window.kind}`, text: `${name} limit: ${Math.round(left)}% left for the next ${span(until / 1000)}. Put the small asks into one prompt, and keep the big ones for after the reset.` })
+      const pace = paceOf(window.kind, nowMs - TRAIL_MS)
+      const lasts = pace !== null && pace > 0 ? (left / pace) * 3_600_000 : Infinity
+
+      tips.push(pace !== null && lasts < until
+        ? {
+            id: `limit-${window.kind}`,
+            text: `${name} limit: ${Math.round(left)}% left, going at ${rateOf(pace)} an hour: gone in ${span(lasts / 1000)}, ${span((until - lasts) / 1000)} before it resets. Keep the big asks for after the reset.`,
+            watch: { figure: `limit-${window.kind}`, was: pace },
+          }
+        : { id: `limit-${window.kind}`, text: `${name} limit: ${Math.round(left)}% left for the next ${span(until / 1000)}. Put the small asks into one prompt, and keep the big ones for after the reset.` })
     }
   }
 
   if (reading && reading.mcp.tokens >= 10_000) {
-    tips.push({ id: 'mcp', text: `MCP tools are ${short(reading.mcp.tokens)} tokens of every request, ${short(reading.mcp.topTokens)} of them from "${reading.mcp.top}". /mcp switches off the servers this task does not need.` })
+    tips.push({
+      id: 'mcp',
+      text: `MCP tools are ${short(reading.mcp.tokens)} tokens of every request, ${short(reading.mcp.topTokens)} of them from "${reading.mcp.top}". /mcp switches a server off: without that one, every request is ${short(reading.mcp.topTokens)} lighter.`,
+      watch: { figure: 'mcp', was: reading.mcp.tokens },
+    })
   }
 
   if (reading && reading.memory.tokens >= 6_000) {
-    tips.push({ id: 'memory', text: `Memory files are ${short(reading.memory.tokens)} tokens of every request; the largest is ${reading.memory.top} (${short(reading.memory.topTokens)}). /memory opens them: keep what still changes how Claude works.` })
+    tips.push({
+      id: 'memory',
+      text: `Memory files are ${short(reading.memory.tokens)} tokens of every request; ${reading.memory.top} is ${short(reading.memory.topTokens)} of them. /memory opens it: each 1k you cut comes off every request from then on.`,
+      watch: { figure: 'memory', was: reading.memory.tokens },
+    })
   }
 
-  const stopped = recent.filter(ask => ask.isAborted).length
+  const stopped = recent.filter(ask => ask.isAborted)
 
-  if (recent.length >= 5 && stopped >= 3) {
-    tips.push({ id: 'stopped', text: `You stopped ${stopped} of your last ${recent.length} turns. Plan mode (Shift+Tab) agrees the approach before tokens are spent on doing it.` })
+  if (recent.length >= 5 && stopped.length >= 3) {
+    const lost = (bill?.rows ?? []).filter(row => stopped.some(ask => ask.seq === row.turn.seq)).reduce((sum, row) => sum + row.amount, 0)
+    tips.push({
+      id: 'stopped',
+      text: `You stopped ${stopped.length} of your last ${recent.length} turns${lost > 0 ? `, ${money$(lost)} into them` : ''}. Plan mode (Shift+Tab) shows the approach before anything is done: say no there instead.`,
+      watch: { figure: 'stopped', was: stopped.length / recent.length },
+    })
   }
 
   tips.push(...noted)
@@ -1399,7 +1877,12 @@ function adviceOf(): Tip[] {
     const itemised = bill.main + bill.agents
 
     if (bill.agents >= 100 && bill.agents >= itemised * 0.4) {
-      tips.push({ id: 'agents', text: `Subagents are ${Math.round((bill.agents / itemised) * 100)}% of what this session has spent (${money$(bill.agents)}). For a small lookup, ask Claude to do it inline.` })
+      const runs = bill.rows.reduce((sum, row) => sum + row.ids.length, 0)
+      tips.push({
+        id: 'agents',
+        text: `Subagents are ${Math.round((bill.agents / itemised) * 100)}% of what this session has spent: ${money$(bill.agents)}${runs > 1 ? ` over ${count(runs)} runs, ${money$(Math.round(bill.agents / runs))} a run` : ''}. For a small lookup, ask Claude to do it inline.`,
+        watch: { figure: 'agents', was: bill.agents / itemised },
+      })
     }
   }
 
@@ -1407,30 +1890,45 @@ function adviceOf(): Tip[] {
   const words = latest.reduce((sum, ask) => sum + ask.words, 0) / Math.max(1, latest.length)
 
   if (latest.length === 6 && words <= 5) {
-    tips.push({ id: 'terse', text: `Your last 6 prompts averaged ${Math.max(1, Math.round(words))} words. Name the file, the goal and what done looks like: one clear ask beats three corrections.` })
+    tips.push({
+      id: 'terse',
+      text: `Your last 6 prompts averaged ${Math.max(1, Math.round(words))} words. Name the file, the goal and what done looks like: one clear ask beats three corrections.`,
+      watch: { figure: 'terse', was: words },
+    })
   }
 
-  const pasted = recent.filter(ask => ask.chars >= 3_000).length
+  const pasted = recent.filter(ask => ask.chars >= 3_000)
 
-  if (pasted >= 2) {
-    tips.push({ id: 'pasted', text: `${pasted} of your last ${recent.length} prompts were over 3,000 characters. Put a long log in a file and point Claude at it: it reads what it needs.` })
+  if (pasted.length >= 2) {
+    // About four characters to a token.
+    const carried = Math.round(pasted.reduce((sum, ask) => sum + ask.chars, 0) / 4)
+    tips.push({
+      id: 'pasted',
+      text: `${pasted.length} of your last ${recent.length} prompts were over 3,000 characters: about ${short(carried)} tokens that every later request sends again. Put a long log in a file and point Claude at it.`,
+      watch: { figure: 'pasted', was: pasted.length / recent.length },
+    })
   }
 
   if (reading && asks >= 30 && reading.percent >= 50) {
-    tips.push({ id: 'long', text: `${count(asks)} prompts in this conversation and ${reading.percent}% of the window in use. A new task? /clear starts it light and keeps your memory files.` })
+    tips.push({
+      id: 'long',
+      text: `${count(asks)} prompts in this conversation, and every request now sends ${short(reading.used)} tokens. A new task? /clear starts it ${messages > 0 ? `at about ${short(rest)}` : 'light'} and keeps your memory files.`,
+      ...context,
+    })
   }
 
-  const sent = (ledger?.turns ?? []).reduce((sum, turn) => sum + turn.tokens.input + turn.tokens.cacheRead + turn.tokens.cacheWrite, 0)
-  const cached = (ledger?.turns ?? []).reduce((sum, turn) => sum + turn.tokens.cacheRead, 0)
-
-  if (sent >= 200_000 && cached >= sent * 0.85) {
-    tips.push({ id: 'warm', text: `${Math.round((cached / sent) * 100)}% of this session's input came from the prompt cache, where it costs about a tenth. Back-to-back prompts keep it warm.` })
+  if (reading && messages >= 20_000) {
+    tips.push({
+      id: 'clear',
+      text: `Every request sends all ${short(reading.used)} tokens of this conversation again. When the task changes, /clear: the next one sends about ${short(rest)}.`,
+      ...context,
+    })
   }
 
   if (bill && bill.rows.length > 0) {
     const itemised = bill.rows.reduce((sum, row) => sum + row.amount, 0)
     tips.push({ id: 'tally', text: `${count(bill.rows.length)} ${bill.rows.length === 1 ? 'prompt' : 'prompts'} so far for ${money$(itemised)}: ${money$(Math.round(itemised / bill.rows.length))} each on average. /${COMMAND} costs says what each one cost, and why.` })
-  } else if (reading) {
+  } else if (reading && tips.length === 0) {
     tips.push({ id: 'window', text: `The window is ${reading.percent}% in use. /context shows what is filling it, category by category.` })
   }
 
@@ -1460,27 +1958,11 @@ function newInClaudeCode(body: string): Note[] {
     const text = tidy(`New in Claude Code ${version}: ${added[1] ?? ''}`)
 
     if (text !== null) {
-      notes.push({ topic: 'ai', text, by: 'changelog', href: CHANGELOG_PAGE })
+      notes.push({ topic: 'ai', text, href: CHANGELOG_PAGE })
     }
   }
 
   return notes
-}
-
-// Stories about AI that did well on Hacker News lately, by their titles; each links to its discussion.
-function headlines(body: string): Note[] {
-  const hits = (parsed(body) as { hits?: unknown } | undefined)?.hits
-
-  return (Array.isArray(hits) ? hits as Array<{ title?: unknown; objectID?: unknown }> : []).flatMap((hit): Note[] => {
-    const text = typeof hit.title === 'string' && !/^(Ask|Tell) HN/.test(hit.title) ? tidy(hit.title.replace(/^Show HN:\s*/, '')) : null
-    const id = typeof hit.objectID === 'string' && /^\d+$/.test(hit.objectID) ? hit.objectID : ''
-
-    if (text === null || !ABOUT_AI.test(text) || GRIM.test(text)) {
-      return []
-    }
-
-    return [{ topic: 'ai', text, by: 'Hacker News', ...(id === '' ? {} : { href: `https://news.ycombinator.com/item?id=${id}` }) }]
-  })
 }
 
 function dadJokes(body: string): Note[] {
@@ -1503,35 +1985,115 @@ function jokeOf(raw: string): Note[] {
   return text === null || NOT_FUNNY.test(text) ? [] : [{ topic: 'joke', text }]
 }
 
-// An outlet's feed of good news: its items' titles, each with its link when that is the outlet's own.
-function goodNews(by: string, host: string, body: string): Note[] {
-  return [...body.matchAll(/<item\b[\s\S]*?<\/item>/g)].flatMap((item): Note[] => {
-    const title = /<title>([\s\S]*?)<\/title>/.exec(item[0])?.[1]
-    const link = /<link>\s*(https:\/\/[^\s<]+)\s*<\/link>/.exec(item[0])?.[1]
-    const text = title === undefined ? null : tidy(title)?.replace(/ - (LOOK|WATCH|LISTEN)$/i, '') ?? null
+// An outlet's feed (RSS or Atom) as notes: of each story the gist its own summary gives, never its
+// headline, and its link, the short one a feed gives for a post where it does. `isLead` says the summary
+// is the story's opening lines, not a summary written as one.
+function stories(topic: Pile, host: string, isLead: boolean, body: string): Note[] {
+  return [...body.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/g)].flatMap((found): Note[] => {
+    const item = found[0]
+    const title = plainOf(/<title\b[^>]*>([\s\S]*?)<\/title>/.exec(item)?.[1] ?? '')
+    const text = gistOf(/<(description|summary)\b[^>]*>([\s\S]*?)<\/\1>/.exec(item)?.[2] ?? '', title, isLead)
+    const href = [
+      /<(guid|id)\b[^>]*>\s*(https:\/\/[^\s<]+\/\?p=\d+)\s*<\/\1>/.exec(item)?.[2],
+      /<link>\s*(https:\/\/[^\s<]+)\s*<\/link>/.exec(item)?.[1],
+      /<link\b[^>]*\bhref="(https:\/\/[^"\s]+)"/.exec(item)?.[1],
+    ].map(link => link?.replace(/&amp;/g, '&')).find(link => link !== undefined && isOf(link, host))
 
-    if (text === null || GRIM.test(text) || ABOUT_ITSELF.test(text)) {
+    if (text === null || href === undefined || ABOUT_ITSELF.test(title) || [title, text].some(said => GRIM.test(said) || HEATED.test(said))) {
       return []
     }
 
-    const site = link === undefined ? '' : /^https:\/\/([^/]+)/.exec(link)?.[1] ?? ''
-    const isTheirs = site === host || site.endsWith(`.${host}`)
-
-    return [{ topic: 'news', text, by, ...(link !== undefined && isTheirs && link.length <= 300 ? { href: link } : {}) }]
+    return [{ topic, text, href }]
   })
 }
 
-// Text from a feed made fit to draw on one line: no markup, no entities, typography made plain. Null when
-// anything else is left that is not a printable Latin character (so no escape ever reaches the terminal,
-// and a character is a cell), or when what is left is shorter than `least` or longer than `most`: a note's
-// bounds, unless told a name's.
+// Whether a link is one the line may show for an outlet: its own, plain, and no longer than a link may be.
+function isOf(link: string, host: string): boolean {
+  const site = /^https:\/\/([^/?#]+)/.exec(link)?.[1] ?? ''
+
+  return (site === host || site.endsWith(`.${host}`)) && link.length <= LINK_MAX && /^[!-~]+$/.test(link)
+}
+
+// The gist of a story, from the summary its feed gives of it. Of a summary written as one: as many of
+// its sentences, from the first, as fit and are about the story. Of a story's opening lines: the first
+// sentence that names someone, somewhere or a figure. Either is cut short when it is too long (see cut).
+// Null with nothing that can stand for the story: a headline is no gist.
+function gistOf(summary: string, title: string, isLead: boolean): string | null {
+  const plain = plainOf(summary)
+    .replace(/\s*The (post|article) .{0,300}? (appeared first|first appeared) on .{0,80}$/, '')
+    .replace(/^BY THE [A-Z ]+ TEAM\s*/, '')
+    .replace(/\s*\[\s*[.]{3}\s*\]\s*$/, '...')
+  const bare = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const sentences = sentencesOf(plain)
+  const isDull = (sentence: string, nth: number): boolean =>
+    sentence.split(' ').length < 6
+    || sentence.startsWith('(')
+    || sentence.endsWith('?')
+    || NOT_A_GIST.test(sentence)
+    || SELF.test(sentence)
+    || bare(sentence) === bare(title)
+    || LEANS.test(sentence)
+    || (nth > 0 && LEANS_LATER.test(sentence))
+    || (SCENE.test(sentence) && !/\d/.test(sentence))
+    || (sentence.endsWith('...') && SUBORDINATE.test(sentence))
+  // A figure, a capital after the first word, or a first word that is a name by its looks.
+  const isNamed = (shown: string): boolean => /\d/.test(shown) || /[\s"'(-](?!I\b)[A-Z][A-Za-z]/.test(shown) || /^[A-Z][a-z]*[A-Z]|^[A-Z][A-Za-z]+'s\b/.test(shown)
+  const first = sentences[0]
+  let picked: string | undefined
+
+  if (isLead) {
+    picked = sentences.slice(0, 3).find((sentence, nth) => !isDull(sentence, nth) && isNamed(cut(sentence, GIST_MAX)))
+  } else if (first !== undefined && !isDull(first, 0)) {
+    picked = first
+
+    for (const sentence of sentences.slice(1)) {
+      if (`${picked} ${sentence}`.length > GIST_MAX || sentence.endsWith('?') || NOT_A_GIST.test(sentence) || SELF.test(sentence)) {
+        break
+      }
+
+      picked = `${picked} ${sentence}`
+    }
+  }
+
+  return picked === undefined ? null : tidy(cut(picked, GIST_MAX), NOTE_MIN, GIST_MAX)
+}
+
+// A text as its sentences. A stop ends one only before a capital, a figure or a quotation, and not after
+// a title, an initial or the like.
+function sentencesOf(text: string): string[] {
+  const sentences: string[] = []
+  let start = 0
+
+  for (const stop of text.matchAll(/[.!?]+["')\]]*\s+(?=["'([]?[A-Z0-9])/g)) {
+    const at = stop.index ?? 0
+    const before = /([A-Za-z.]*)$/.exec(text.slice(start, at))?.[1] ?? ''
+
+    if (stop[0].startsWith('.') && ABBREVIATED.test(before)) {
+      continue
+    }
+
+    sentences.push(text.slice(start, at + stop[0].trimEnd().length))
+    start = at + stop[0].length
+  }
+
+  return start < text.length ? [...sentences, text.slice(start)] : sentences
+}
+
+// Text from a feed made fit to draw on one line (see plainOf). Null when anything is left that is not a
+// printable Latin character (so no escape ever reaches the terminal, and a character is a cell) or that
+// is still an entity, or when what is left is shorter than `least` or longer than `most`: a note's bounds,
+// unless told otherwise.
 function tidy(raw: string, least = NOTE_MIN, most = NOTE_MAX): string | null {
-  const plain = raw
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+  const plain = plainOf(raw)
+
+  return /^[\x20-\x7E\u00A1-\u024F]*$/.test(plain) && !/&#?[a-z0-9]+;/i.test(plain) && plain.length >= least && plain.length <= most ? plain : null
+}
+
+// A feed's text on one line, without its markup and entities and with its typography made plain. A feed
+// may escape its markup once more, so that is taken off twice.
+function plainOf(raw: string): string {
+  return unmarked(unmarked(raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')))
     .replace(/<[^>]*>/g, ' ')
-    .replace(/&#(\d+);/g, (_, code: string) => charOf(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => charOf(parseInt(code, 16)))
-    .replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (_, name: string) => ENTITY[name] ?? ' ')
     .replace(/[\u2018\u2019\u2032]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
     // A dash between words keeps them apart; a hyphen joins them.
@@ -1541,8 +2103,14 @@ function tidy(raw: string, least = NOTE_MIN, most = NOTE_MAX): string | null {
     .replace(/[`\u00A0\u200B\uFEFF]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
 
-  return /^[\x20-\x7E\u00A1-\u024F]*$/.test(plain) && plain.length >= least && plain.length <= most ? plain : null
+function unmarked(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&#(\d+);/g, (_, code: string) => charOf(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => charOf(parseInt(code, 16)))
+    .replace(/&([a-z]+);/g, (whole: string, name: string) => ENTITY[name] ?? whole)
 }
 
 function charOf(code: number): string {
@@ -1558,28 +2126,22 @@ function parsed(body: string): unknown {
 }
 
 // What a session kept of the feeds, read back as carefully as the feeds themselves: the file is anyone's
-// to edit.
+// to edit. One kept in another format is of no use here: the feeds are read anew.
 function freshOf(value: unknown): Fresh | null {
-  const v = value as { at?: unknown; notes?: unknown } | null | undefined
+  const v = value as { format?: unknown; at?: unknown; notes?: unknown } | null | undefined
 
-  if (typeof v !== 'object' || v === null || typeof v.at !== 'number' || !Array.isArray(v.notes)) {
+  if (typeof v !== 'object' || v === null || v.format !== FORMAT || typeof v.at !== 'number' || !Array.isArray(v.notes)) {
     return null
   }
 
   const notes = (v.notes as Array<Partial<Note> | null>).flatMap((note): Note[] => {
     const text = typeof note?.text === 'string' ? tidy(note.text) : null
-    const by = typeof note?.by === 'string' ? tidy(note.by, 1, NAME_MAX) : null
 
     if (!note || text === null || (note.topic !== 'ai' && note.topic !== 'joke' && note.topic !== 'news')) {
       return []
     }
 
-    return [{
-      topic: note.topic,
-      text,
-      ...(by === null ? {} : { by }),
-      ...(typeof note.href === 'string' && /^https:\/\/[^\s]+$/.test(note.href) && note.href.length <= 300 ? { href: note.href } : {}),
-    }]
+    return [{ topic: note.topic, text, ...(typeof note.href === 'string' && /^https:\/\/[!-~]+$/.test(note.href) && note.href.length <= LINK_MAX ? { href: note.href } : {}) }]
   })
 
   return { at: v.at, notes }
@@ -1639,12 +2201,12 @@ function wordedCells(gauge: Gauge, width: number): Cell[] {
 
 // How a cell of a bar is drawn. Every cell is BACKGROUND, so a bar is one height along its length whatever
 // the terminal's line spacing, and the mascot stands on it: a part in its own colour, what is free or gone
-// in the track's, each with its block glyph in that same colour (a copy of the band still carries it). A
-// shaded part shows its glyph over the track. A word written in the bar is cut out of a part, and stands
-// plain over the track.
+// in the track's black, each with its block glyph in that same colour (a copy of the band still carries
+// it). A shaded part shows its glyph over the track. A word written in the bar is cut out of a part, and
+// stands white over the track.
 function paintOf(cell: Cell): { backgroundColor: string; color?: string } {
   if (cell.isDim || cell.color === undefined) {
-    return cell.isWord === true ? { backgroundColor: TRACK } : { backgroundColor: TRACK, color: TRACK }
+    return { backgroundColor: TRACK, color: cell.isWord === true ? TRACK_WORD : TRACK }
   }
 
   if (cell.glyph === SHADE) {
@@ -1788,6 +2350,7 @@ function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
     return {
       name,
       title: `${name} limit`,
+      isWindow: true,
       parts: drain(left, 100 - left),
       label: `${Math.round(left)}% left${reset}`,
       short: `${Math.round(left)}% left`,
@@ -1799,6 +2362,7 @@ function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
     gauges.push({
       name: 'Month',
       title: 'Month budget',
+      isWindow: false,
       parts: drain(left, budget - left),
       label: `${dollars(left)} left of ${dollars(budget)}`,
       short: `${dollars(left)} left`,
@@ -1809,6 +2373,7 @@ function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
     gauges.push({
       name: 'Month',
       title: 'Month',
+      isWindow: false,
       parts: [
         { name: 'spent', weight: monthSpend, glyph: '█', color: 'permission', isDim: false },
         { name: 'room', weight: ceiling - monthSpend, glyph: '░', color: 'inactive', isDim: true },
@@ -1894,6 +2459,7 @@ function statement(money: Ledger): string {
 
   return [
     `Session total reported by Claude Code: ${money$(bill.total)}`,
+    ...periodsOf(money).map(period => `  ${`This ${period.name} window:`.padEnd(18)}${money$(period.total)}  (seen spent since it began, or since this session first met it: the band's cost)`),
     `  Itemised below:   ${money$(itemised)}`,
     ...(money.folded.prompts > 0 ? [`  Earlier prompts:  ${money$(bill.folded)}  (${count(money.folded.prompts)} prompts older than the ${MAX_TURNS} kept line by line)`] : []),
     `  Before tracking:  ${money$(bill.before)}  (spent before this ledger first looked; cannot be itemised)`,
@@ -2050,6 +2616,16 @@ function isLedger(value: unknown): value is Ledger {
     && typeof v.seen === 'number' && typeof v.untracked === 'number' && typeof v.steps === 'number'
     && typeof v.nextSeq === 'number' && Array.isArray(v.turns) && typeof v.agents === 'object' && v.agents !== null
     && typeof v.folded === 'object' && v.folded !== null
+    && (v.spent === undefined || (typeof v.spent === 'object' && v.spent !== null && typeof v.spent.main === 'number' && typeof v.spent.agents === 'number'))
+    && (v.marks === undefined || (typeof v.marks === 'object' && v.marks !== null && Object.values(v.marks).every(isMark)))
+}
+
+function isMark(value: unknown): value is Mark {
+  const v = value as Partial<Mark> | null | undefined
+
+  return typeof v === 'object' && v !== null
+    && (v.resetsAt === null || typeof v.resetsAt === 'string')
+    && typeof v.used === 'number' && typeof v.usd === 'number' && typeof v.main === 'number' && typeof v.agents === 'number'
 }
 
 function isDays(value: unknown): value is Days {
