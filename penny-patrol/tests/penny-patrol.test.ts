@@ -464,11 +464,20 @@ test('where the scene has no room, by width or by rows, the bars stand alone wit
   expect(mascotOf(await linesOf(narrow))).toBeNull()
   await narrow.unmount()
 
-  // A band allowed fewer rows than the scene has: the same.
+  // A band allowed fewer rows than the scene has: first the limit bars give up the free rows over them,
+  // and what the cost bar still has to say stands beside the first of them. Eight rows for twelve.
   const low = await mount($, 120, 11)
-  expect(await rowsOf(low)).toHaveLength(3)
-  expect(textOf((await rowsOf(low))[0]!)).toMatch(/^█+░+▒+ {2}30% · 60k \/ 200k · 107k free$/)
+  const lowLines = await linesOf(low)
+  expect(lowLines).toHaveLength(8)
+  expect(mascotOf(lowLines)).toMatchObject({ row: 0, at: 0 })
+  expect(lowLines.slice(5).map(line => saidOf(line, 120))).toEqual(['Cost     $2.00', '         Before tracking $2.00', ''])
+  expect(lowLines.slice(6).map(line => sceneOf(line, 120))).toEqual([`${FIVE}${'░'.repeat(7)}`, `${WEEK}${'░'.repeat(6)}`])
   await low.unmount()
+  // With fewer rows than that, the bars alone.
+  const lower = await mount($, 120, 7)
+  expect(await rowsOf(lower)).toHaveLength(3)
+  expect(textOf((await rowsOf(lower))[0]!)).toMatch(/^█+░+▒+ {2}30% · 60k \/ 200k · 107k free$/)
+  await lower.unmount()
 
   // A label gives way before its bar does, last part first.
   const tiny = await mount($, 30)
@@ -670,6 +679,33 @@ test('all the way down and back there is a bar under the mascot at every step', 
   // Its two rows are always the two right over a bar, and that bar is the scene's whole width.
   expect([...new Set(stood)].sort()).toEqual(['0:24', '3:24', '6:24', '9:24'])
   expect(stood.slice(0, 77).filter((where, i) => where !== stood[i - 1])).toEqual(['0:24', '3:24', '6:24', '9:24'])
+})
+
+test('where the limit bars have given up their free rows the mascot keeps to the bars above them', SLOW, async ($, on) => {
+  const world = engine(on, { usd: 3, windows: twoWindows, lines: 'offline' })
+  await begin($)
+  // Nine rows: the context and cost bars with their free rows, the two limits, and the line. With eight,
+  // the same without the line.
+  const ui = await mount($, 62, 9)
+  expect(await rowsOf(ui)).toHaveLength(9)
+  expect(await lineOf(ui)).not.toBeNull()
+  await turnStart($, 'work')
+  const stood = new Set<number | undefined>()
+
+  // Two bars of nineteen stops: thirty-eight steps out, and as many back.
+  for (let step = 0; step < 80; step += 1) {
+    stood.add(mascotOf(await linesOf(ui))?.row)
+    await world.clock.advance(1_000)
+  }
+
+  expect([...stood].sort()).toEqual([0, 3])
+  const rows = await rowsOf(ui)
+  expect([6, 7].map(i => barOf(rows[i]!).map(([text]) => text).join('').length)).toEqual([24, 24])
+  await ui.unmount()
+  const noLine = await mount($, 62, 8)
+  expect(await rowsOf(noLine)).toHaveLength(8)
+  expect(await lineOf(noLine)).toBeNull()
+  expect(mascotOf(await linesOf(noLine))).not.toBeNull()
 })
 
 test('the mascot takes the colour of the part of the bar under it, and wears its own over what is free or gone', SLOW, async ($, on) => {

@@ -1056,14 +1056,18 @@ function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, m
       lineOf('Model', [now.model, effort === null ? '' : `${capital(effort)} effort`], width, true),
       lineOf('Steps', (['today', 'week', 'month', 'year'] as const).map(period => `${capital(period)} ${count(mine[period].steps)}`), width, true),
     ]
-    const rows = scene(Box, Text, sections, header, track)
-    // The line says something else each time the mascot has walked a bar's length. It gives way before
-    // the scene does.
+    // The line says something else each time the mascot has walked a bar's length.
     const line = lineRow(Box, Text, Link, inner, Math.floor(strides / Math.max(1, track - MASCOT_CELLS + 1)))
 
-    for (const children of line ? [[...rows, line], rows] : [rows]) {
-      if (children.length <= maxRows) {
-        return Box({ flexDirection: 'column', paddingX: 1, children })
+    // With fewer rows than all of it needs, the line gives way first; then the limit bars give up the free
+    // rows over them, and the mascot keeps to the bars above; only then does the scene.
+    for (const low of gauges.length > 0 ? [0, gauges.length] : [0]) {
+      const rows = scene(Box, Text, sections, header, track, low)
+
+      for (const children of line ? [[...rows, line], rows] : [rows]) {
+        if (children.length <= maxRows) {
+          return Box({ flexDirection: 'column', paddingX: 1, children })
+        }
       }
     }
   }
@@ -1076,15 +1080,26 @@ function band(Box: Box, Text: Text, Link: Link, now: Reading, columns: number, m
 // The scene and its readout, row by row: over each bar its two free rows, the mascot in them when it is
 // on that bar; at the right of every row, a line. The lines beside the free rows are what the bar above
 // still has to say (the model and the steps, over the first), then what must stand right above this one.
-function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track: number): RenderElement[] {
+// The last `low` bars have no free rows over them: the mascot does not come there, and what the bars
+// above still have to say stands beside them instead.
+function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track: number, low: number): RenderElement[] {
   const span = track - MASCOT_CELLS
-  const spot = spotOf(strides, sections.length, span)
+  const walked = sections.length - low
+  const spot = spotOf(strides, walked, span)
   const isWalking = isMainWorking || background > 0
   const blank = (cells: number): RenderElement[] => (cells > 0 ? [Text({ children: ' '.repeat(cells) })] : [])
   const rows: RenderElement[] = []
   let waiting = header
 
   sections.forEach((section, i) => {
+    if (i >= walked) {
+      const [line, ...rest] = waiting
+      waiting = rest
+      rows.push(Box({ flexDirection: 'row', children: [...runsOf(Text, section.cells), ...blank(GAP), ...(line ? written(Text, line) : [])] }))
+
+      return
+    }
+
     const open = LANES - section.above.length
     const lines = [...Array.from({ length: open }, (_, slot) => waiting[slot]), ...section.above]
 
@@ -1100,7 +1115,7 @@ function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track:
 
     rows.push(Box({ flexDirection: 'row', children: [...runsOf(Text, section.cells), ...blank(GAP), ...written(Text, section.beside)] }))
     const next = sections[i + 1]
-    waiting = section.below(next ? LANES - next.above.length : LANES)
+    waiting = section.below(!next ? LANES : i + 1 >= walked ? low : LANES - next.above.length)
   })
 
   // What the last bar has to say goes under it.

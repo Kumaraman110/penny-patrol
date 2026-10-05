@@ -86,9 +86,11 @@ Its face says how things are:
 | `-__-` | asleep: nothing is running |
 | `>__<` | the meter under it has less than a fifth left: of the room before compaction, of a limit window, of the budget |
 
-**In a small terminal** (narrower than 65 columns, or where the band may not take the rows it needs:
-three for each bar, and one for the line) the line goes first; if that is not enough the bars are drawn
-alone, each with its figures, the limits side by side under their names, and the mascot stays home.
+**In a small terminal** the band takes what there is. Where it may not have the rows it needs (three
+for each bar, and one for the line) the line goes first. Then the limit bars give up the free rows over
+them, and the mascot keeps to the context and cost bars. With fewer rows than that, or narrower than 65
+columns, the bars are drawn alone, each with its figures, the limits side by side under their names, and
+the mascot stays home.
 
 ### The line
 
