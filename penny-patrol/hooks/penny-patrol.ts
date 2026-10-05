@@ -17,8 +17,9 @@
 // THE SCENE AND THE READOUT: the bars stand at the left, two free rows over each; every word is at the
 // right, a line a row. The free rows are the mascot's: it stands on a bar, and while anything runs (a
 // turn, or a background shell or subagent) it takes a step a second, along the first bar, down, back
-// along the second, down, along the third, and then the whole way back. Steps are kept by day, so they
-// add up to the week (from Sunday), the month and the year, across every session on this machine.
+// along the second, down, along the third, and then the whole way back. It takes the colour of the part
+// of the bar under it, and its face says how things are there. Steps are kept by day, so they add up to
+// the week (from Sunday), the month and the year, across every session on this machine.
 //
 // WHAT IS WHOSE: a session's ledger, days and choices are its own (sessions/, days/ under the folder
 // below, one file a session, written by that session alone). The limits and the budget are the
@@ -72,8 +73,9 @@ type Bill = {
   agents: number
   rows: Array<{ turn: Turn; amount: number; ids: string[]; shares: number[] }>
 }
-type Cell = { glyph: string; color: string | undefined; isDim: boolean }
-type Part = { name: string; weight: number; glyph: string; color: string; isDim: boolean }
+// `isTight`: this part of a meter is nearly spent (the mascot's face shows it).
+type Cell = { glyph: string; color: string | undefined; isDim: boolean; isTight: boolean }
+type Part = { name: string; weight: number; glyph: string; color: string; isDim: boolean; isTight?: boolean }
 // A limit bar, and what is said of it: at length, or `short` where that does not fit.
 type Gauge = { name: string; parts: Part[]; label: string; short: string }
 // A piece of text drawn one way, and a line of the readout: its label, then what it says.
@@ -97,13 +99,12 @@ const SAVE_EVERY_STEPS = 15
 // How often a session looks at what the others wrote: the limits, then (less often) their days.
 const SHARE_EVERY_TICKS = 5
 const SCAN_EVERY_TICKS = 30
-const RATE_AFTER_STEPS = 60
 // A redraw a minute keeps the countdowns moving while nothing else does.
 const REDRAW_EVERY_TICKS = 60
 // Single-width block characters: they line up in every terminal font.
 const GLYPH: Record<Kind, string> = { used: '█', free: '░', buffer: '▒' }
 const ORDER: Kind[] = ['used', 'free', 'buffer']
-const EMPTY: Cell = { glyph: '░', color: 'inactive', isDim: true }
+const EMPTY: Cell = { glyph: '░', color: 'inactive', isDim: true, isTight: false }
 // The scene takes this share of the band, the readout the rest (to TEXT_MAX cells), GAP between them.
 // A line of the readout is a label of LABEL cells, then what it says.
 const TRACK_SHARE = 0.4
@@ -113,17 +114,23 @@ const LABEL = 9
 // The least inner width the scene and its readout are drawn in; narrower, the bars alone.
 const FULL_COLUMNS = 58
 // The mascot, six cells by two rows; LANES rows over each bar are kept free for it. Its body is four
-// cells of its colour as BACKGROUND, with what is dark cut out of them by a glyph (the pairs marked
-// true): two eyes in the upper row, the gaps between four legs in the lower. A background fills its cell
-// whatever the terminal's line spacing, so the two rows join; block glyphs alone would leave a seam.
-// Its arms are half blocks at its sides. The inner legs step in and out as it walks.
+// cells of colour as BACKGROUND, with what is dark cut out of them by a glyph: its face in the upper row,
+// the gaps between four legs in the lower. A background fills its cell whatever the terminal's line
+// spacing, so the two rows join; block glyphs alone would leave a seam. Its arms are half blocks at its
+// sides, and its inner legs step in and out as it walks.
+//
+// It takes the colour of the part of the bar under it (the cell under MASCOT_MIDDLE); over the empty
+// stretch of a bar, and over the gap between two bars, it wears its own. Its face: asleep while nothing
+// runs, happy while it walks, and strained wherever the meter under it is nearly spent (TIGHT_SHARE).
 const MASCOT_COLOR = 'claude'
 const MASCOT_CELLS = 6
-const HEAD: Array<[string, boolean]> = [['▄', false], ['▪  ▪', true], ['▄', false]]
-const LEGS: Array<Array<[string, boolean]>> = [
-  [[' ', false], ['▗▗▖▖', true], [' ', false]],
-  [[' ', false], ['▗▖▗▖', true], [' ', false]],
-]
+const MASCOT_MIDDLE = 2
+const ARM = '▄'
+const FACE = { asleep: '-__-', happy: '^__^', strained: '>__<' }
+const LEGS = ['▗▗▖▖', '▗▖▗▖']
+// A meter is tight with less than this share left: of the room before compaction, of a limit's window,
+// of the month's budget. (For the limits that is where their bar turns red.)
+const TIGHT_SHARE = 0.2
 const LANES = 2
 // Background work that keeps the session running after its turn ended.
 const RUNNING_KINDS = new Set(['shell', 'subagent', 'workflow'])
@@ -647,11 +654,13 @@ function band(Box: Box, Text: Text, now: Reading, columns: number, maxRows: numb
   const bill = money ? billOf(money) : null
   const totals = calendar(nowMs)
   const gauges = gaugesOf(totals.month.usd, money !== null)
-  const context = now.segments.map(partOf)
   const free = now.segments.reduce((sum, segment) => sum + (segment.kind === 'free' ? segment.tokens : 0), 0)
+  // The room before compaction is what is in use and what is free; the buffer is not room.
+  const isTight = free < (now.used + free) * TIGHT_SHARE
+  const context = now.segments.map(segment => ({ ...partOf(segment), isTight }))
   const contextFacts = [`${now.percent}%`, `${short(now.used)} / ${short(now.window)}`, free > 0 ? `${short(free)} free` : '']
   const spend = bill ? spendParts(bill) : []
-  const costFacts = money && bill ? [money$(bill.total), promptOf(money, bill), ...rateOf(money, bill)] : []
+  const costFacts = money && bill ? [money$(bill.total), promptOf(money, bill)] : []
 
   if (inner >= FULL_COLUMNS) {
     const room = Math.min(TEXT_MAX, inner - GAP - Math.floor(inner * TRACK_SHARE))
@@ -721,7 +730,7 @@ function band(Box: Box, Text: Text, now: Reading, columns: number, maxRows: numb
 
     const header = [
       lineOf('model', [now.model, effort === null ? '' : `${effort} effort`], width, true),
-      lineOf('steps', periodsOf(totals), width, true),
+      lineOf('steps', (['today', 'week', 'month', 'year'] as const).map(period => `${period} ${count(totals[period].steps)}`), width, true),
     ]
     const rows = scene(Box, Text, sections, header, track)
 
@@ -741,7 +750,7 @@ function band(Box: Box, Text: Text, now: Reading, columns: number, maxRows: numb
 function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track: number): RenderElement[] {
   const span = track - MASCOT_CELLS
   const spot = spotOf(strides, sections.length, span)
-  const mascot = [HEAD, LEGS[isMainWorking || background > 0 ? strides % 2 : 0] ?? []]
+  const isWalking = isMainWorking || background > 0
   const blank = (cells: number): RenderElement[] => (cells > 0 ? [Text({ children: ' '.repeat(cells) })] : [])
   const rows: RenderElement[] = []
   let waiting = header
@@ -752,11 +761,7 @@ function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track:
 
     lines.forEach((line, lane) => {
       const left = spot.bar === i
-        ? [
-            ...blank(spot.at),
-            ...(mascot[lane] ?? []).map(([children, isCut]) => Text({ color: MASCOT_COLOR, inverse: isCut, children })),
-            ...blank(span - spot.at + GAP),
-          ]
+        ? [...blank(spot.at), ...mascotRow(Text, section.cells[spot.at + MASCOT_MIDDLE], lane, isWalking), ...blank(span - spot.at + GAP)]
         : blank(track + GAP)
       rows.push(Box({ flexDirection: 'row', children: [...left, ...(line ? written(Text, line) : [])] }))
     })
@@ -772,6 +777,20 @@ function scene(Box: Box, Text: Text, sections: Section[], header: Line[], track:
   }
 
   return rows
+}
+
+// One row of the mascot (0 its face between its arms, 1 its legs), over the cell `under` its middle.
+function mascotRow(Text: Text, under: Cell | undefined, row: number, isWalking: boolean): RenderElement[] {
+  // A dim cell is the empty stretch of a bar, and a cell with no colour a gap: neither is a part.
+  const color = under && under.color !== undefined && !under.isDim ? under.color : MASCOT_COLOR
+
+  if (row === 0) {
+    const face = under?.isTight === true ? FACE.strained : isWalking ? FACE.happy : FACE.asleep
+
+    return [Text({ color, children: ARM }), Text({ color, inverse: true, children: face }), Text({ color, children: ARM })]
+  }
+
+  return [Text({ children: ' ' }), Text({ color, inverse: true, children: LEGS[isWalking ? strides % 2 : 0] ?? '' }), Text({ children: ' ' })]
 }
 
 // Too little room for the scene: the bars alone, each with its figures, and no mascot. A label gives way
@@ -820,7 +839,7 @@ function compact(Box: Box, Text: Text, inner: number, bars: Array<{ parts: Part[
 function cellsOf(parts: Part[], width: number): Cell[] {
   const counts = apportion(parts.map(part => part.weight), width, 1)
   const cells = parts.flatMap((part, i) =>
-    Array.from({ length: counts[i] ?? 0 }, (): Cell => ({ glyph: part.glyph, color: part.color, isDim: part.isDim })),
+    Array.from({ length: counts[i] ?? 0 }, (): Cell => ({ glyph: part.glyph, color: part.color, isDim: part.isDim, isTight: part.isTight === true })),
   )
 
   while (cells.length < width) {
@@ -833,7 +852,7 @@ function cellsOf(parts: Part[], width: number): Cell[] {
 // The limit bars on one row of the scene. One alone takes the row. Of several, the first stands before
 // its name and the others after theirs, so the row begins and ends on a bar, as the rows over it do.
 function stripOf(gauges: Gauge[], width: number): Cell[] {
-  const worded = (text: string): Cell[] => [...text].map(glyph => ({ glyph, color: undefined, isDim: true }))
+  const worded = (text: string): Cell[] => [...text].map(glyph => ({ glyph, color: undefined, isDim: true, isTight: false }))
   const names = gauges.map((gauge, i) => (gauges.length === 1 ? '' : i === 0 ? ` ${gauge.name}` : `  ${gauge.name} `))
   const named = Math.floor((width - names.join('').length) / gauges.length)
   // Where the names leave the bars no room, the bars go without them, a cell apart.
@@ -944,24 +963,6 @@ function wrapped(chips: Chip[], width: number, rows: number): Run[][] | null {
   return lines
 }
 
-// Steps since the start of today, the week, the month and the year. Periods that count the same are
-// said once ("week/month/year 500"): on the first day of a week all four do.
-function periodsOf(totals: Record<'today' | 'week' | 'month' | 'year', Day>): string[] {
-  const groups: Array<{ names: string[]; steps: number }> = []
-
-  for (const period of ['today', 'week', 'month', 'year'] as const) {
-    const last = groups.at(-1)
-
-    if (last && last.steps === totals[period].steps) {
-      last.names.push(period)
-    } else {
-      groups.push({ names: [period], steps: totals[period].steps })
-    }
-  }
-
-  return groups.map(group => `${group.names.join('/')} ${count(group.steps)}`)
-}
-
 // What the last request carried, as the API counted it: everything sent in (and how much of it was read
 // from the prompt cache), and what came out.
 function sentOf(last: ModelUsage | null): string[] {
@@ -1031,11 +1032,12 @@ function gaugesOf(monthSpend: number, hasMoney: boolean): Gauge[] {
 // What is left, then what is gone: green while more than half is left, amber to a fifth, red below.
 function drain(left: number, gone: number): Part[] {
   const portion = left + gone > 0 ? left / (left + gone) : 0
-  const color = portion > 0.5 ? 'success' : portion > 0.2 ? 'warning' : 'error'
+  const isTight = portion <= TIGHT_SHARE
+  const color = portion > 0.5 ? 'success' : isTight ? 'error' : 'warning'
 
   return [
-    { name: 'left', weight: left, glyph: '█', color, isDim: false },
-    { name: 'gone', weight: gone, glyph: '░', color: 'inactive', isDim: true },
+    { name: 'left', weight: left, glyph: '█', color, isDim: false, isTight },
+    { name: 'gone', weight: gone, glyph: '░', color: 'inactive', isDim: true, isTight },
   ].filter(part => part.weight > 0)
 }
 
@@ -1077,13 +1079,6 @@ function spendParts(bill: Bill): Part[] {
     { name: 'Subagents', weight: bill.agents, glyph: '█', color: 'cyan_FOR_SUBAGENTS_ONLY', isDim: false },
     { name: 'Earlier prompts', weight: bill.folded, glyph: '▒', color: 'inactive', isDim: false },
   ].filter(part => part.weight > 0)
-}
-
-// The rate while working, once there is a minute of it.
-function rateOf(money: Ledger, bill: Bill): string[] {
-  const itemised = (bill.total - bill.before) / 100
-
-  return money.steps >= RATE_AFTER_STEPS && itemised > 0 ? [`${dollars(itemised / (money.steps / 3600))}/h while working`] : []
 }
 
 // The ledger as text: the session's total reconciled to the cent, then every prompt and what it used.

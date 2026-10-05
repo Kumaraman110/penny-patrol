@@ -3,7 +3,7 @@
 Three meters above your Claude Code prompt: how full the context window is, who spent this session's
 dollars, and what is left of your limits. A small mascot walks them while Claude works.
 
-![Penny Patrol above the prompt: three bars at the left with the mascot standing on the first, and a readout at the right](docs/preview.png)
+![Penny Patrol above the prompt: three bars at the left with the mascot standing on the first, in the colour of the part under it, and a readout at the right](docs/preview.png)
 
 *The mod's own drawing, rendered outside a terminal for this page. Your terminal's theme sets the colours.*
 
@@ -43,11 +43,11 @@ each under a short label.
 | Line | What it says |
 | --- | --- |
 | `model` | The model, and the reasoning effort once a tool call has reported it. |
-| `steps` | Working time, a step a second: today, this week (from Sunday), this month, this year, over every session on this machine. Periods that count the same are said once: `today 412 · week/month 3,412 · year 12,480`. |
+| `steps` | Working time, a step a second: today, this week (from Sunday), this month, this year, over every session on this machine. |
 | `context` | Beside the context bar: the share in use, tokens in use of the window, and what is free before Claude Code compacts. |
 | | Under it, the legend: the categories and colours of `/context`. When they do not all fit, the smallest give way and the line ends on how many (`+2`). |
 | | When the legend fits on one line, the last request: everything sent in (and how much of it was read from the prompt cache), and what came out. |
-| `cost` | Beside the cost bar: the session's total as Claude Code reports it, what the current prompt has cost so far, and the hourly rate while working. |
+| `cost` | Beside the cost bar: the session's total as Claude Code reports it, and what the current prompt has cost so far. |
 | | Under it: who spent it. `Main` is the main conversation, `Subagents` everything it started. What was spent before Penny Patrol first looked is a figure here, not a part of the bar. |
 | `5h`, `week` | What is *left* of each limit window your account reports, and when it resets. |
 | `month` | For an account billed by the API, which has no such window: the month's spend. |
@@ -62,9 +62,18 @@ the next request.
 **The limit bars** drain as you use a window: green above half, amber down to a fifth, red below. The
 month's bar grows toward the next round figure, or, once you give it a budget, drains that.
 
-**The mascot** stands on a bar. While anything runs (a turn, a background shell, a subagent) it takes a
-step a second: along the context bar, down, back along the cost bar, down, along the limit bars, and then
-the whole way back. When nothing runs it stands where it is.
+**The mascot** stands on a bar and takes the colour of the part under it; over the empty stretch of a
+bar it wears its own. While anything runs (a turn, a background shell, a subagent) it takes a step a
+second: along the context bar, down, back along the cost bar, down, along the limit bars, and then the
+whole way back. When nothing runs it stands where it is.
+
+Its face says how things are:
+
+| Face | When |
+| --- | --- |
+| `^__^` | walking |
+| `-__-` | asleep: nothing is running |
+| `>__<` | the meter under it has less than a fifth left: of the room before compaction, of a limit window, of the budget |
 
 **In a small terminal** (narrower than 65 columns, or where the band may not take its nine rows) the
 bars are drawn alone, each with its figures, and the mascot stays home.
@@ -74,7 +83,7 @@ bars are drawn alone, each with its figures, and the mascot stays home.
 | Command | What it does |
 | --- | --- |
 | `/penny-patrol` | Hide the band, or show it again. This session only. |
-| `/penny-patrol costs` | The ledger: every prompt, what it cost, and the tokens that explain it. |
+| `/penny-patrol costs` | The ledger: every prompt, what it cost, the tokens that explain it, and the hourly rate while working. |
 | `/penny-patrol audit` | Check the figures against each other and against what Claude Code reports. |
 | `/penny-patrol budget 8000` | Set the month's budget in dollars. `budget off` clears it. |
 
