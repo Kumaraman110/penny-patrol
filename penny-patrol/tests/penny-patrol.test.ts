@@ -20,7 +20,7 @@ const faced = (face: string): string => `▄${face}▄`
 const FACE = { asleep: faced('-__-'), strained: faced('>__<') }
 const SMILES = ['^__^', '^uu^', 'n__n', '^ww^', '^oo^', '*__*', '^__~', '~__^', '$__$']
 const LEGS = [' ▗▗▖▖ ', ' ▗▖▗▖ ']
-const TOPICS: Record<string, string> = { AI: 'permission', Joke: 'claude', 'Good news': 'success', 'For you': 'warning' }
+const TOPICS: Record<string, string> = { 'Learn something new': 'permission', Smile: 'claude', 'Feel good': 'success', 'For you': 'warning' }
 
 // A test may take a minute: on a busy machine the engine's start alone can outlast the kit's five seconds.
 const SLOW = { timeoutMs: 60_000 }
@@ -1224,6 +1224,123 @@ test('with the plan\'s windows known the cost is what was spent in each and in t
   expect(text).toContain('  2.     $0.50  second')
 })
 
+test('when the count it is told goes back to nothing, as it does after /login, the session has still spent what it spent: its cost, its prompts and its windows go on', SLOW, async ($, on) => {
+  const world = engine(on, { usd: 5, windows: [{ kind: 'five_hour', percentUsed: 40, resetsAt: soon }, { kind: 'seven_day', percentUsed: 30, resetsAt: later }] })
+  await begin($)
+  const ui = await mount($, 120)
+  const cost = async (): Promise<string[]> => (await linesOf(ui)).slice(8, 10).map(line => saidOf(line, 120))
+  await turnStart($, 'first')
+  world.usd = 5.4
+  await call($)
+  world.usd = 6.2
+  await turnEnd($, 'agent-1')
+  world.usd = 6.25
+  await turnEnd($)
+  expect(await cost()).toEqual(['Cost     5h $1.25 · Week $1.25 · Plan $1.25 · This prompt $1.25', '         █ Main $0.45  █ Subagents $0.80'])
+
+  // /login: the count starts again from nothing. Nothing the band says of the session's money moves
+  // (this used to begin the ledger again: every figure fell to what was spent since).
+  await turnStart($, '/login')
+  world.usd = 0
+  await call($)
+  expect((await cost())[0]).toBe('Cost     5h $1.25 · Week $1.25 · Plan $1.25 · This prompt $1.25')
+  expect((await cost())[1]).toBe('         █ Main $0.45  █ Subagents $0.80')
+  world.usd = 0.5
+  await turnEnd($)
+  expect(await cost()).toEqual(['Cost     5h $1.75 · Week $1.75 · Plan $1.75 · This prompt $0.50', '         █ Main $0.95  █ Subagents $0.80'])
+  // What was seen in all, and what of it was spent before the count began again, are kept with the session.
+  expect(fileOf(world, 'sessions/session-one.json')).toMatchObject({ ledger: { seen: 6.75, carried: 6.25, untracked: 5, nextSeq: 3, marks: { five_hour: { usd: 5 }, seven_day: { usd: 5 }, '@plan': { usd: 5 } } } })
+
+  // The ledger still has every prompt, and says in so many words what the count it is told now is.
+  const text = (await command($, 'costs')).text
+  expect(text).toContain('Session total: $6.75  (Claude Code reports $0.50: its count started over during this session, as it does after /login, and $6.25 had been spent by then)')
+  expect(text).toContain('  This Week window: $1.75')
+  expect(text).toContain('  Itemised below:   $1.75')
+  expect(text).toContain('  Before tracking:  $5.00')
+  expect(text).toContain('  Unaccounted:      $0.00')
+  expect(text).toContain('  1.     $1.25  first')
+  expect(text).toContain('  2.     $0.50  /login')
+  expect((await command($, 'audit')).text).toContain('OK   Cost: prompts $1.75 + earlier $0.00 + before tracking $5.00 = $6.75; Claude Code reports $0.50 on top of the $6.25 spent before its count started over')
+
+  // It can happen again, and a session that loads again goes on from the same place.
+  await turnStart($, 'again')
+  world.usd = 0.1
+  await turnEnd($)
+  expect(await cost()).toEqual(['Cost     5h $1.85 · Week $1.85 · Plan $1.85 · This prompt $0.10', '         █ Main $1.05  █ Subagents $0.80'])
+  expect(fileOf(world, 'sessions/session-one.json')).toMatchObject({ ledger: { seen: 6.85, carried: 6.75 } })
+  world.usd = 0.3
+  await turnEnd($)
+  expect((await cost())[0]).toBe('Cost     5h $2.05 · Week $2.05 · Plan $2.05 · This prompt $0.30')
+})
+
+test('a ledger that an earlier version began again at /login gets back what its days still hold, each window from where it began', SLOW, async ($, on) => {
+  // As 0.2.0 left a session that went through /login: the ledger knows the $20 spent since (and met the
+  // five-hour window after $12 of it); the session's days hold all $320 it ever spent.
+  const world = engine(on, { usd: 20, windows: [{ kind: 'five_hour', percentUsed: 4, resetsAt: soon }, { kind: 'seven_day', percentUsed: 42, resetsAt: later }] })
+  const none = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+  put(world, 'sessions/session-one.json', {
+    ledger: {
+      seen: 20, untracked: 0, folded: { usd: 0, prompts: 0 }, steps: 40, nextSeq: 2,
+      turns: [{ seq: 1, label: '/login', main: 15, tokens: none, model: null, agents: { 'agent-1': 5 } }], agents: {}, spent: { main: 15, agents: 5 },
+      marks: {
+        five_hour: { resetsAt: soon, used: 4, usd: 12, main: 9, agents: 3 },
+        seven_day: { resetsAt: later, used: 42, usd: 0, main: 0, agents: 0 },
+        '@plan': { resetsAt: new Date(2026, 10, 1).toISOString(), used: 0, usd: 0, main: 0, agents: 0 },
+      },
+    },
+    effort: null, isHidden: false,
+  })
+  // $100 on a day before both the week and the plan's month began, $200 yesterday, and today's $20.
+  put(world, 'days/session-one.json', { '2026-09-28': { steps: 10, usd: 100 }, '2026-10-03': { steps: 20, usd: 200 }, '2026-10-04': { steps: 10, usd: 20 } })
+  await begin($)
+  const ui = await mount($, 120)
+  const cost = async (): Promise<string[]> => (await linesOf(ui)).slice(8, 10).map(line => saidOf(line, 120))
+
+  // The five hours began after the loss: all $300 came before them, and they hold the $8 spent since they
+  // were met. The week and the month were running: of the $300, the $100 of 28 September is before both.
+  expect((await cost())[0]).toBe('Cost     5h $8.00 · Week $220.00 · Plan $220.00 · This prompt $20.00')
+  const text = (await command($, 'costs')).text
+  expect(text).toContain('Session total: $320.00  (Claude Code reports $20.00: its count started over during this session, as it does after /login, and $300.00 had been spent by then)')
+  expect(text).toContain('  Earlier prompts:  $300.00  ($300.00 put back from this session\'s days: a ledger before 0.3.0 forgot it when the count started over)')
+  expect(text).toContain('  Itemised below:   $20.00')
+  expect(text).toContain('  Unaccounted:      $0.00')
+  expect((await command($, 'audit')).text).toContain('OK   Cost: prompts $20.00 + earlier $300.00 + before tracking $0.00 = $320.00; Claude Code reports $20.00 on top of the $300.00 spent before its count started over')
+
+  // From there it goes on as any session does, and what was put back is not put back twice.
+  await turnStart($, 'next')
+  world.usd = 21.5
+  await turnEnd($)
+  expect((await cost())[0]).toBe('Cost     5h $9.50 · Week $221.50 · Plan $221.50 · This prompt $1.50')
+  // Kept with the session as it now is: the total, what was carried, and each window's mark.
+  expect(fileOf(world, 'sessions/session-one.json')).toMatchObject({
+    ledger: { seen: 321.5, carried: 300, mended: 300, untracked: 0, folded: { usd: 300, prompts: 0 }, spent: { main: 316.5, agents: 5 }, marks: { five_hour: { usd: 312, main: 309, agents: 3 }, seven_day: { usd: 100 }, '@plan': { usd: 100 } } },
+  })
+  // The session loads again (its days now hold exactly what it tracked): nothing is put back a second time.
+  world.startedAt = 2
+  await call($)
+  expect((await cost())[0]).toBe('Cost     5h $9.50 · Week $221.50 · Plan $221.50 · This prompt $1.50')
+  world.usd = 22
+  await turnEnd($)
+  expect(fileOf(world, 'sessions/session-one.json')).toMatchObject({ ledger: { seen: 322, carried: 300, mended: 300, folded: { usd: 300, prompts: 0 } } })
+})
+
+test('a ledger whose days hold no more than it tracked is left exactly as it is', SLOW, async ($, on) => {
+  const world = engine(on, { usd: 9 })
+  const none = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+  const ledger = { seen: 9, untracked: 1, folded: { usd: 0, prompts: 0 }, steps: 0, nextSeq: 2, turns: [{ seq: 1, label: 'earlier', main: 8, tokens: none, model: null, agents: {} }], agents: {}, spent: { main: 8, agents: 0 } }
+  put(world, 'sessions/session-one.json', { ledger, effort: null, isHidden: false })
+  // Every dollar it tracked is in its days (the first was spent before it looked): nothing is missing.
+  put(world, 'days/session-one.json', { '2026-10-03': { steps: 0, usd: 5 }, '2026-10-04': { steps: 0, usd: 3 } })
+  await begin($)
+  await turnStart($, 'work')
+  world.usd = 9.5
+  await turnEnd($)
+  const kept = (fileOf(world, 'sessions/session-one.json') as { ledger: Record<string, unknown> }).ledger
+  expect(kept).toMatchObject({ seen: 9.5, untracked: 1, folded: { usd: 0, prompts: 0 } })
+  expect(kept.carried).toBeUndefined()
+  expect(kept.mended).toBeUndefined()
+})
+
 test('a window that runs out begins again there and then, and one with no end told when less of it is used', SLOW, async ($, on) => {
   const ends = new Date(NOW + 10 * 60_000).toISOString()
   const world = engine(on, { usd: 1, windows: [{ kind: 'five_hour', percentUsed: 40, resetsAt: ends }] })
@@ -1391,6 +1508,8 @@ const DECODER = [
   story('Acme halves its prices', 'Acme has cut the price of its largest model by half. The reporting was supported by a grant from Initech.', 'https://the-decoder.com/?p=41110', 'https://the-decoder.com/prices/', 'article'),
   story('Acme opens an office', 'Acme has opened an office in Lisbon for 40 engineers. Read more about the move on our site.', 'https://the-decoder.com/?p=41111', 'https://the-decoder.com/office/', 'article'),
   story('A model for the Moon', 'NASA and IBM have released the Lunar Foundation Model, one of the first open-source AI models for lunar science. It was trained on 12 years of images from an orbiter and is free to download.', 'https://the-decoder.com/?p=41067', 'https://the-decoder.com/moon/', 'article'),
+  story('Acme ships a much faster open model', 'Acme has shipped an open model that runs 3 times faster on a laptop.', 'https://the-decoder.com/?p=41112', 'https://the-decoder.com/faster/', 'article'),
+  story('Acme Superintelligence Laboratories reorganises', 'Acme has moved its researchers into one laboratory in Zurich.', 'https://the-decoder.com/?p=41113', 'https://the-decoder.com/reorg/', 'article'),
   '</channel></rss>',
 ].join('\n')
 const entry = (title: string, summary: string, post: number): string =>
@@ -1459,7 +1578,7 @@ const CHANGELOG_PAGE = 'https://code.claude.com/docs/en/changelog'
 const UMBRELLAS = { topic: 'news', text: 'Underwater umbrellas could protect coral reefs from heat, a new study by Florida scientists finds.', href: 'https://www.goodnewsnetwork.org/?p=241699' }
 const MUDLARK = { topic: 'news', text: 'A mudlark has spent nearly a decade searching the Thames foreshore for fragments of the past.', href: 'https://www.positive.news/?p=594738' }
 const KOLIBRI = { topic: 'ai', text: 'Aleph Alpha has released Kolibri, a German-English model with 78 billion parameters.', href: 'https://the-decoder.com/?p=41102' }
-const kept = { format: 2, at: NOW, notes: [UMBRELLAS, MUDLARK, KOLIBRI] }
+const kept = { format: 3, at: NOW, notes: [UMBRELLAS, MUDLARK, KOLIBRI] }
 
 test('the line under the bars: something about AI, a joke, good news, by turns, another every four minutes of work', SLOW, async ($, on) => {
   const world = engine(on, { usd: 1, lines: 'live' })
@@ -1484,11 +1603,11 @@ test('the line under the bars: something about AI, a joke, good news, by turns, 
     seen.push({ label: first?.label ?? '', color: first?.color, text: first?.text ?? '' })
   }
 
-  expect(seen.map(note => note.label)).toEqual(['AI', 'Joke', 'Good news', 'AI', 'Joke', 'Good news', 'AI', 'Joke', 'Good news'])
+  expect(seen.map(note => note.label)).toEqual(['Learn something new', 'Smile', 'Feel good', 'Learn something new', 'Smile', 'Feel good', 'Learn something new', 'Smile', 'Feel good'])
   expect(seen.map(note => note.color)).toEqual(seen.map(note => TOPICS[note.label]))
   // Good news is only ever what a feed gave: its gist, then its link. There are two of them, so the third
   // time it is the first one's turn again; nothing else was said twice.
-  const news = seen.filter(note => note.label === 'Good news').map(note => note.text)
+  const news = seen.filter(note => note.label === 'Feel good').map(note => note.text)
   expect(news.slice(0, 2).sort()).toEqual([`${MUDLARK.text} ${MUDLARK.href}`, `${UMBRELLAS.text} ${UMBRELLAS.href}`])
   expect(news[2]).toBe(news[0])
   expect(new Set(seen.map(note => note.text)).size).toBe(8)
@@ -1502,14 +1621,14 @@ test('the line under the bars: something about AI, a joke, good news, by turns, 
 
 test('a line is its label, one space, and the note right after it; a story\'s link comes whole after its gist, which gives way where the band is narrow', SLOW, async ($, on) => {
   const world = engine(on, { lines: 'live' })
-  put(world, 'lines.json', { format: 2, at: NOW, notes: [UMBRELLAS] })
+  put(world, 'lines.json', { format: 3, at: NOW, notes: [UMBRELLAS] })
   await begin($)
   // The third turn is the good news': eight minutes of work in.
   await turnStart($, 'work')
   await world.clock.advance(480_000)
   const wide = await mount($, 220)
   expect((await lineOf(wide))?.pieces.map(piece => [piece.text, piece.isBold, piece.isDim, piece.href])).toEqual([
-    ['Good news ', true, false, undefined],
+    ['Feel good ', true, false, undefined],
     [UMBRELLAS.text, false, false, undefined],
     [' ', false, false, undefined],
     // On a terminal the address is written out, for the terminal to make a link of.
@@ -1525,19 +1644,68 @@ test('a line is its label, one space, and the note right after it; a story\'s li
   // A hundred and twenty columns leave the gist sixty-six cells: it is cut where a clause ends, and marked
   // as cut; the link is whole.
   const narrow = await mount($, 120)
-  expect((await lineOf(narrow))?.pieces.map(piece => piece.text)).toEqual(['Good news ', 'Underwater umbrellas could protect coral reefs from heat...', ' ', UMBRELLAS.href])
+  expect((await lineOf(narrow))?.pieces.map(piece => piece.text)).toEqual(['Feel good ', 'Underwater umbrellas could protect coral reefs from heat...', ' ', UMBRELLAS.href])
   expect(textOf((await rowsOf(narrow)).at(-1)!).length).toBeLessThanOrEqual(118)
   await narrow.unmount()
 
   // Eighty leave it twenty-six, which is no gist: the turn goes to the next kind.
   const tight = await mount($, 80)
-  expect((await lineOf(tight))?.label).toBe('AI')
+  expect((await lineOf(tight))?.label).toBe('Learn something new')
+})
+
+test('what comes with the mod says where to read more: its link beside it where there is room, the note whole and the link left out where there is not', SLOW, async ($, on) => {
+  const world = engine(on, { usd: 1, lines: 'offline' })
+  await begin($)
+  await turnStart($, 'work')
+  const READ_MORE = /^https:\/\/(code\.claude\.com\/docs\/en\/[a-z-]+|platform\.claude\.com\/docs\/en\/[a-z/-]+|en\.wikipedia\.org\/wiki\/[A-Za-z_-]+|arxiv\.org\/abs\/[\d.]+|github\.com\/Kumaraman110\/penny-patrol#slash-commands)$/
+  const wide = await mount($, 260)
+  const seen: Array<{ label: string; pieces: string[] }> = []
+
+  for (let turn = 0; turn < 12; turn += 1) {
+    const line = await lineOf(wide)
+    seen.push({ label: line?.label ?? '', pieces: line?.pieces.map(piece => piece.text) ?? [] })
+    await world.clock.advance(240_000)
+  }
+
+  // Every note about learning something is its label, the note, a space and its link: nothing else, and
+  // no note without one. A smile has no link.
+  const learning = seen.filter(line => line.label === 'Learn something new')
+  expect(learning.length).toBeGreaterThanOrEqual(6)
+
+  for (const line of learning) {
+    expect(line.pieces).toHaveLength(4)
+    expect(line.pieces[0]).toBe('Learn something new ')
+    expect(line.pieces[1]?.endsWith('...')).toBe(false)
+    expect(line.pieces[2]).toBe(' ')
+    expect(line.pieces[3]).toMatch(READ_MORE)
+  }
+
+  expect(seen.filter(line => line.label === 'Smile').every(line => line.pieces.length === 2)).toBe(true)
+  await wide.unmount()
+
+  // Eighty-seven columns: a note that fits is said whole, with no link beside it (there is no room for
+  // one), rather than cut to make room for its link or passed over for having one.
+  const narrow = await mount($, 87)
+  const said: string[][] = []
+
+  for (let turn = 0; turn < 9; turn += 1) {
+    const line = await lineOf(narrow)
+
+    if (line?.label === 'Learn something new') {
+      said.push(line.pieces.map(piece => piece.text))
+    }
+
+    await world.clock.advance(240_000)
+  }
+
+  expect(said.length).toBeGreaterThanOrEqual(3)
+  expect(said.every(pieces => pieces.length === 2 && !pieces[1]!.endsWith('...') && !/https:/.test(pieces.join('')))).toBe(true)
 })
 
 test('a note too long for the band is passed over for one that fits; the line gives way before the scene does', SLOW, async ($, on) => {
   const world = engine(on, { usd: 1, lines: 'offline' })
   await begin($)
-  const ui = await mount($, 70)
+  const ui = await mount($, 87)
   await turnStart($, 'work')
   const lines: Array<{ label: string; text: string }> = []
 
@@ -1547,15 +1715,16 @@ test('a note too long for the band is passed over for one that fits; the line gi
     await world.clock.advance(240_000)
   }
 
-  // Sixty-eight cells at seventy columns, the label and its space among them. Few of the notes that come
-  // with the mod are that short: they take their turns, whole, and none of the longer ones is shown cut.
-  expect(lines.every(line => line.text.length > 0 && line.label.length + 1 + line.text.length <= 68 && !line.text.endsWith('...'))).toBe(true)
+  // Eighty-five cells at eighty-seven columns, the label and its space among them. Few of the notes that
+  // come with the mod are that short: they take their turns, whole, and none of the longer ones is shown
+  // cut. There is no room beside them for where to read more, so the link is left out, not the note.
+  expect(lines.every(line => line.text.length > 0 && line.label.length + 1 + line.text.length <= 85 && !line.text.endsWith('...'))).toBe(true)
   // Offline there is no good news: its turn goes to the next kind.
-  expect(lines.map(line => line.label)).toEqual(['AI', 'Joke', 'AI', 'AI', 'Joke', 'AI', 'AI', 'Joke', 'AI', 'AI', 'Joke', 'AI'])
+  expect(lines.map(line => line.label)).toEqual(['Learn something new', 'Smile', 'Learn something new', 'Learn something new', 'Smile', 'Learn something new', 'Learn something new', 'Smile', 'Learn something new', 'Learn something new', 'Smile', 'Learn something new'])
   expect(new Set(lines.map(line => line.text)).size).toBeGreaterThanOrEqual(4)
 
   // None of a kind is said again before all of that kind that fit have been said.
-  for (const label of ['AI', 'Joke']) {
+  for (const label of ['Learn something new', 'Smile']) {
     const said = lines.filter(line => line.label === label).map(line => line.text)
     expect(said.slice(0, new Set(said).size)).toEqual([...new Set(said)])
   }
@@ -1574,7 +1743,7 @@ test('a note too long for the band is passed over for one that fits; the line gi
   expect(mascotOf(await linesOf(scene))).not.toBeNull()
 })
 
-test('the feeds are read through the host when what they gave is old: of a story its gist and its link, never its headline; and kept for every session', SLOW, async ($, on) => {
+test('the feeds are read through the host when what they gave is old: of a story its hook and its link (the headline, the gist where the headline is only a label); and kept for every session', SLOW, async ($, on) => {
   const world = engine(on, { lines: 'live' })
   online(world)
   await begin($)
@@ -1589,45 +1758,52 @@ test('the feeds are read through the host when what they gave is old: of a story
   expect(world.fetched[4]?.headers).toEqual({ Accept: 'application/json' })
   expect(world.fetched[4]?.url).toMatch(/[?&]page=([1-9]|1\d|20)$/)
   const file = fileOf(world, 'lines.json') as { format: number; at: number; notes: Array<{ topic: string; text: string; href?: string }> }
-  expect(file.format).toBe(2)
+  expect(file.format).toBe(3)
   expect(file.at).toBe(NOW + 4_000)
   expect(file.notes).toEqual([
     // What was added, release by release: not the plumbing, not a line with a character that is no Latin
     // letter, not the line the read cut short.
     { topic: 'ai', text: 'New in Claude Code 2.1.288: recovery for a prompt cleared with Ctrl+C: pressing Up on the empty prompt brings the draft back, including pasted text and images', href: CHANGELOG_PAGE },
     { topic: 'ai', text: 'New in Claude Code 2.1.287: a count such as "2 of 5" to the permission prompt when several permission requests stack up', href: CHANGELOG_PAGE },
-    // A summary written as one: as many of its sentences as fit, without what the feed says of itself
-    // after them, and with the short link the feed gives for the post. A long one is cut where a clause
-    // ends. Nothing grim, nothing about politics, and no link that is not the outlet's own.
-    { topic: 'ai', text: 'Aleph Alpha has released Kolibri, a German-English model with 78 billion parameters. Over 21 percent of the training data is German.', href: 'https://the-decoder.com/?p=41102' },
-    { topic: 'ai', text: 'Anthropic employees donated $540 million in 2025 alone, nearly five times as much as the next-largest Fortune 500 donors...', href: 'https://the-decoder.com/?p=41108' },
-    // A summary stops before a sentence that is about the outlet or the page, and before one that would
-    // take it past its length: it is said in whole sentences where it can be.
+    // A story is told by its HOOK: the headline its outlet wrote, with the short link the feed gives for
+    // the post. The summary's figures do not take its place where the summary is long (the first) or was
+    // cut short (the second). Nothing grim, nothing about politics, and no link that is not the outlet's own.
+    { topic: 'ai', text: 'Aleph Alpha releases Kolibri, an open-weight model', href: 'https://the-decoder.com/?p=41102' },
+    { topic: 'ai', text: 'Anthropic is becoming a big corporate donor', href: 'https://the-decoder.com/?p=41108' },
+    // A headline of a few words is a label, not a hook: the gist is told. A summary stops before a sentence
+    // that is about the outlet or the page, and before one that would take it past its length.
     { topic: 'ai', text: 'Acme has cut the price of its largest model by half.', href: 'https://the-decoder.com/?p=41110' },
     { topic: 'ai', text: 'Acme has opened an office in Lisbon for 40 engineers.', href: 'https://the-decoder.com/?p=41111' },
     { topic: 'ai', text: 'NASA and IBM have released the Lunar Foundation Model, one of the first open-source AI models for lunar science.', href: 'https://the-decoder.com/?p=41067' },
+    // A headline that is a hook gives way to the gist only for a figure it does not have itself, in a gist
+    // that is whole and short: a number is what earns a line a second look.
+    { topic: 'ai', text: 'Acme has shipped an open model that runs 3 times faster on a laptop.', href: 'https://the-decoder.com/?p=41112' },
+    // Four words are a label however long they are: the gist is told, figure or no figure.
+    { topic: 'ai', text: 'Acme has moved its researchers into one laboratory in Zurich.', href: 'https://the-decoder.com/?p=41113' },
     // A story's opening lines: the first sentence that names someone or a figure, not one that only sets
     // the scene, though it names someone. Markup escaped twice comes off twice. No sentence that names
     // nothing, none that leans on its headline, no question, and never one with an escape in it.
-    { topic: 'ai', text: 'OpenAI\'s latest ad format will put images of sponsored products on your screen.', href: 'https://www.theverge.com/?p=1004655' },
+    { topic: 'ai', text: 'OpenAI is sticking more ads in ChatGPT', href: 'https://www.theverge.com/?p=1004655' },
     { topic: 'ai', text: 'Google has put Gemini 4 into Docs for 3 billion users.', href: 'https://www.theverge.com/?p=1004700' },
     // Jokes at nobody's expense, and none with an entity left in it.
     { topic: 'joke', text: 'A steak pun is a rare medium well done.' },
     { topic: 'joke', text: 'Why did the tomato blush? Because it saw the salad dressing.' },
     { topic: 'joke', text: 'Why did the functional programmer get thrown out of school? Because he refused to take classes.' },
-    // Good news: entities and typography made plain; a summary of two sentences whole, and of one where
-    // the second is a question; none that opens with a question, no gallery, nothing that only says the
-    // headline again, nothing about who pays for the outlet, and nothing that points at what it does not
-    // say ("is betting on it", "the trio").
-    { topic: 'news', text: 'Seasoned mudlark Emmylou Vaxby has spent nearly a decade searching the Thames foreshore for fragments of the city\'s past', href: 'https://www.positive.news/?p=594738' },
-    { topic: 'news', text: 'The UK has one of the highest NEET rates for young adults in Europe. New figures offer some encouragement', href: 'https://www.positive.news/?p=592622' },
+    // Good news by its headline, entities and typography made plain: also where the summary opens with a
+    // question, or only says the headline again (the headline IS the hook). No gallery, nothing about who
+    // pays for the outlet. Where the headline is a label, the gist: of one sentence where the second is a
+    // question, and never one that points at what it does not say ("is betting on it", "the trio").
+    { topic: 'news', text: 'Meet the 14-year-old uncovering London\'s lost history', href: 'https://www.positive.news/?p=594738' },
+    { topic: 'news', text: 'The race to get more young people into work', href: 'https://www.positive.news/?p=592622' },
+    { topic: 'news', text: 'I stopped reading bad news for 48 hours', href: 'https://www.positive.news/?p=593754' },
+    { topic: 'news', text: 'Kosovo was cleared of landmines after 27 years of work', href: 'https://www.positive.news/?p=594045' },
     { topic: 'news', text: 'A village in Kerala has rebuilt its school in 9 months.', href: 'https://www.positive.news/?p=594800' },
     // Nothing grim, nothing about the outlet itself, no sentence its feed cut off before it got anywhere,
     // none that leans on another; and where the feed gives no short link, the story's own address. A
     // story that four of the outlet's feeds gave is one story. A
     // sentence that only seems to set a scene has a figure in it; a long one is cut at the end of a
     // word, not in one, which keeps more of it than its one early comma would.
-    { topic: 'news', text: 'Underwater umbrellas could protect coral reefs from heat - and even partly reverse the bleaching, according to a new study by Florida scientists.', href: 'https://www.goodnewsnetwork.org/?p=241699' },
+    { topic: 'news', text: 'Underwater Umbrellas Could Protect Coral Reefs From Heat Damage', href: 'https://www.goodnewsnetwork.org/?p=241699' },
     { topic: 'news', text: 'A \'ghost\' lobster so rare that the odds of finding one are 1 in 100 million is going to school.', href: 'https://www.goodnewsnetwork.org/ghost-lobster/' },
     { topic: 'news', text: 'There are 107,677 people in Japan who are aged 100 or older, according to health ministry figures.', href: 'https://www.goodnewsnetwork.org/?p=241800' },
     // Good news is told big or small: a story that names no one and no figure is one. But not a sentence
@@ -1636,8 +1812,9 @@ test('the feeds are read through the host when what they gave is old: of a story
     { topic: 'news', text: 'A stray dog that waited outside a hospital for weeks has found a home.', href: 'https://www.goodnewsnetwork.org/?p=241810' },
     { topic: 'news', text: 'After months of talks between UK ministries, the government has decided that the national museums of the country will remain free to every single...', href: 'https://www.goodnewsnetwork.org/?p=241652' },
   ])
-  // No headline is among them.
-  expect(file.notes.map(note => note.text).join('\n')).not.toMatch(/Kolibri, an open-weight|sticking more ads|Meet the 14-year-old|Umbrellas Could Protect/)
+  // A headline that is only a label is never the line: its gist is, or the story is left out.
+  expect(file.notes.map(note => note.text)).not.toEqual(expect.arrayContaining(['Acme halves its prices']))
+  expect(file.notes.map(note => note.text).join('\n')).not.toMatch(/^(A model for the Moon|Gemini comes to Docs|On sleep|The Spark|Kneecap on tour|Fan Becomes a Hero)$/m)
 
   // What was read is on the line, by turns with what came with the mod: first what is fresh.
   const ui = await mount($, 220)
@@ -1650,7 +1827,7 @@ test('the feeds are read through the host when what they gave is old: of a story
     await world.clock.advance(240_000)
   }
 
-  expect(said.map(line => line.label)).toEqual(['AI', 'Joke', 'Good news'])
+  expect(said.map(line => line.label)).toEqual(['Learn something new', 'Smile', 'Feel good'])
   expect(said[0]?.link).toMatch(/^https:\/\/(code\.claude\.com|the-decoder\.com|www\.theverge\.com)\//)
   expect(said[2]?.link).toMatch(/^https:\/\/www\.(positive\.news|goodnewsnetwork\.org)\//)
 })
@@ -1682,7 +1859,7 @@ test('what was kept in another format is of no use: the feeds are read anew, and
   const ui = await mount($, 220)
   await world.clock.advance(4_000)
   expect(world.fetched).toHaveLength(13)
-  expect(fileOf(world, 'lines.json')).toMatchObject({ format: 2, at: NOW + 4_000 })
+  expect(fileOf(world, 'lines.json')).toMatchObject({ format: 3, at: NOW + 4_000 })
   await turnStart($, 'work')
   const said: string[] = []
 
@@ -1696,7 +1873,7 @@ test('what was kept in another format is of no use: the feeds are read anew, and
 
 test('what a session kept of the feeds is read back as carefully as the feeds themselves: the file is anyone\'s to edit', SLOW, async ($, on) => {
   const world = engine(on, { usd: 1, lines: 'live' })
-  put(world, 'lines.json', { format: 2, at: NOW, notes: [
+  put(world, 'lines.json', { format: 3, at: NOW, notes: [
     { topic: 'news', text: 'A kept gist \u001b[2J\u001b[31mwith escapes in it, which is not fit to draw.', href: 'https://example.org/escapes' },
     { topic: 'news', text: 'Bees have returned to a city park after forty years away.', href: 'https://example.org/be\u0007es' },
     { topic: 'news', text: 'A village has planted ten thousand trees in a single day.', href: 'javascript:alert(1)' },
@@ -1715,7 +1892,7 @@ test('what a session kept of the feeds is read back as carefully as the feeds th
   for (let turn = 0; turn < 12; turn += 1) {
     const line = await lineOf(ui)
 
-    if (line?.label === 'Good news') {
+    if (line?.label === 'Feel good') {
       news.push(line.pieces)
     }
 
@@ -1753,7 +1930,7 @@ test('/penny-patrol lines says where the line reads from and changes it: live, o
 
   await world.clock.advance(3_700_000)
   // Offline: what came with the mod, not what an earlier read kept, and not a request made.
-  expect(offline).toEqual(['AI', 'Joke', 'AI', 'AI', 'Joke', 'AI'])
+  expect(offline).toEqual(['Learn something new', 'Smile', 'Learn something new', 'Learn something new', 'Smile', 'Learn something new'])
   expect(world.fetched).toEqual([])
   expect(await lineOf(ui)).not.toBeNull()
   let text = (await command($, 'lines')).text
@@ -1763,7 +1940,7 @@ test('/penny-patrol lines says where the line reads from and changes it: live, o
   // Live: read at once, and said, with how often the line and the feeds turn over.
   text = (await command($, 'lines live')).text
   expect(world.fetched).toHaveLength(13)
-  expect(text).toContain('The line under the bars is live: what came with the mod, and 20 notes read from the feeds 0s ago. It says something else every 4 minutes of work; the feeds are read again every 60 minutes.')
+  expect(text).toContain('The line under the bars is live: what came with the mod, and 24 notes read from the feeds 0s ago. It says something else every 4 minutes of work; the feeds are read again every 60 minutes.')
   expect(fileOf(world, 'settings.json')).toEqual({ budget: null, lines: 'live', isIntroduced: true })
 
   // Off: no line, the scene as it was.
@@ -1837,7 +2014,7 @@ test('every five to ten prompts the line makes a suggestion from the session\'s 
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.label).toBe('For you')
   await world.clock.advance(1_000)
-  expect(['AI', 'Joke']).toContain((await lineOf(ui))?.label)
+  expect(['Learn something new', 'Smile']).toContain((await lineOf(ui))?.label)
 })
 
 test('a suggestion takes a turn of its own: the note after it has its whole four minutes of work', SLOW, async ($, on) => {
@@ -1859,12 +2036,12 @@ test('a suggestion takes a turn of its own: the note after it has its whole four
   expect((await lineOf(ui))?.label).toBe('For you')
   await world.clock.advance(1_000)
   const next = await lineOf(ui)
-  expect(next?.label).toBe('Joke')
+  expect(next?.label).toBe('Smile')
   // The note after it has its own four minutes, though the suggestion came a hundred seconds into a turn.
   await world.clock.advance(239_000)
   expect((await lineOf(ui))?.text).toBe(next?.text)
   await world.clock.advance(1_000)
-  expect(await lineOf(ui)).toMatchObject({ label: 'AI' })
+  expect(await lineOf(ui)).toMatchObject({ label: 'Learn something new' })
   expect((await lineOf(ui))?.text).not.toBe(first)
 })
 

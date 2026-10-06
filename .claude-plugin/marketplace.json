@@ -10,7 +10,7 @@
     {
       "name": "penny-patrol",
       "source": "./penny-patrol",
-      "description": "Meters above the prompt: the context window, the session's spend and what is left of your limits, a small mascot that walks them while Claude works, and a line under them with an AI tip, a joke or a piece of good news."
+      "description": "Meters above the prompt: the context window, the session's spend and what is left of your limits, a small mascot that walks them while Claude works, and a line under them with something to learn, something to smile at or something to feel good about."
     }
   ]
 }
