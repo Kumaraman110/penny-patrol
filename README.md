@@ -2,9 +2,10 @@
 
 Meters above your Claude Code prompt: how full the context window is, who spent this session's dollars,
 and what is left of your limits. A small mascot walks them while Claude works, and a line under them has
-something worth a glance: an AI tip, a joke, a piece of good news, or a suggestion from your own figures.
+something worth a glance: something to learn, something to smile at, something to feel good about, or a
+suggestion from your own figures.
 
-![Penny Patrol above the prompt: four bars one under another (the five-hour limit, the context, the cost, the week's limit), each limit bar saying what is left inside the bar, the mascot standing on one of them in its colour, a line beside each bar, and under them a line of good news with its link](docs/preview.png)
+![Penny Patrol above the prompt: four bars one under another (the five-hour limit, the context, the cost, the week's limit), each limit bar saying what is left inside the bar, the mascot standing on one of them in its colour, a line beside each bar, and under them the line: the label Feel good, a story's headline and its link](docs/preview.png)
 
 *The mod's own drawing, rendered outside a terminal for this page. Your terminal's theme sets the colours.*
 
@@ -127,31 +128,44 @@ minutes of work: while nothing runs it stays as it is.
 
 | Label | What it is | Where it comes from |
 | --- | --- | --- |
-| `AI` | A tip for Claude Code or for prompting, how tokens and caching cost, a fact; and what is new. | With the mod: about forty notes. The commands and keys they name were checked against Claude Code 2.1.289. From the web: what the last Claude Code releases added (its changelog), and stories about AI from The Decoder, TechCrunch and The Verge. |
-| `Joke` | A joke. Mostly about working with AI; some are not about anything. | With the mod: about fifty. From the web: icanhazdadjoke.com, and JokeAPI's programming jokes in its safe mode. |
-| `Good news` | The gist of a story, then its link. Anything that does some good, big or small: a fusion record, a reserve, a dog that found a home. | From the web only: Positive News, Good News Network (its front page and its heroes, animals and inspiring sections), The Optimist Daily, Good Good Good. |
+| `Learn something new` | A tip for Claude Code or for prompting, how tokens and caching cost, a fact; and what is new in AI. Each with a link to where it can be read in full. | With the mod: about forty notes. The commands and keys they name were checked against Claude Code 2.1.289. From the web: what the last Claude Code releases added (its changelog), and stories about AI from The Decoder, TechCrunch and The Verge. |
+| `Smile` | A joke. Mostly about working with AI; some are not about anything. | With the mod: about fifty. From the web: icanhazdadjoke.com, and JokeAPI's programming jokes in its safe mode. |
+| `Feel good` | The hook of a story, then its link. Anything that does some good, big or small: a fusion record, a reserve, a dog that found a home. | From the web only: Positive News, Good News Network (its front page and its heroes, animals and inspiring sections), The Optimist Daily, Good Good Good. |
 | `For you` | A suggestion from this session's own figures, and later what came of it. | Nowhere but your session: see below. |
 
-`AI`, `Joke` and `Good news` take turns. What a feed gave comes before what came with the mod, and
+`Learn something new`, `Smile` and `Feel good` take turns. What a feed gave comes before what came with the mod, and
 nothing is said a second time until all of its kind have been said. A note too long for your terminal
 is passed over for one that fits. Jokes at the expense of what people are, believe or suffer are left
 out.
 
-**A story is its gist and its link, never its headline.** A headline is often a teaser. The gist is taken
-from the summary the outlet's own feed gives of the story:
+**A story is its hook and its link.** The hook is the headline: the line the outlet itself wrote to
+make you want the rest. It is shown as the outlet wrote it. Two things can take its place:
+
+- a headline that is only a label (fewer than five words, or under 28 characters) says too little, so
+  the gist is told instead;
+- a gist with a figure in it, where the headline has none, wins when it is whole and no longer than
+  120 characters: a number is what earns a line a second look.
+
+The gist is taken from the summary the outlet's own feed gives of the story:
 
 - where the outlet writes a summary, as many of its sentences, from the first, as fit;
 - where it gives the story's opening lines, the first sentence that stands by itself. A sentence that
   only sets a scene, leans on the headline or on the sentence before it, asks a question, talks about
-  the outlet, or was cut off by the feed before it got to its point is passed over, and a story with
-  no sentence left is not told. (Of a story about AI the sentence must also name someone or a figure:
-  an essay opens with neither.)
+  the outlet, or was cut off by the feed before it got to its point is passed over. (Of a story about
+  AI the sentence must also name someone or a figure: an essay opens with neither.)
 
-After the gist comes the story's address, written out so that your terminal can open it: the short one
-the outlet gives for a post, where it gives one. Where the band is too narrow for both, the gist is cut
+A story with neither a hook nor a gist is not told.
+
+After the hook comes the story's address, written out so that your terminal can open it: the short one
+the outlet gives for a post, where it gives one. Where the band is too narrow for both, the hook is cut
 at the end of a word and the address stays whole. Stories with a grim word in them, stories about
 politics and the outlets' notes about themselves are left out. No model writes these lines: they are
 the outlet's own words, and nothing read from a feed is ever given to the model.
+
+**What comes with the mod has a link too.** Every note under `Learn something new` ends with the page
+it can be read on: the Claude Code documentation, the Claude platform documentation, Wikipedia, or the
+paper itself. These notes are never cut: where your terminal has no room for the link beside one, the
+note is said whole and the link is left out.
 
 **`For you`** comes every five to ten prompts and holds the line through four minutes of work (and
 for as long as nothing runs, so it is there when you look up). It is the most pressing thing the
@@ -313,6 +327,16 @@ What it cannot know:
 A session keeps its last 200 prompts line by line. Older ones fold into a single "earlier prompts"
 figure: still counted, no longer listed.
 
+**When the count starts over.** Claude Code's own count goes back to nothing when you log in again
+(`/login`). The session has still spent what it spent, so Penny Patrol carries all it had seen and goes
+on from there: the cost on the band, the prompts in the ledger and the plan's windows do not move, and
+`/penny-patrol costs` says what the count now reports and what had been spent before it started over.
+
+Before 0.3.0 the ledger began again at that point, and the session's cost with it. A session that was
+caught by that is put right the next time it loads. Its spending is kept by day, apart from the ledger,
+so whatever the days hold beyond what the ledger tracked goes back into the total as earlier prompts
+(which prompts they were is gone), and each window of the plan gets back what was spent in it.
+
 ## Is it right?
 
 `/penny-patrol audit` checks, on the spot, that the categories add up to the total Claude Code reports,
@@ -353,7 +377,7 @@ Plain JSON files in `~/.penny-patrol`, which you can read:
 | `days/<session id>.json` | That session's steps and dollars, by day |
 | `limits.json` | The newest limit reading any session saw |
 | `settings.json` | The month's budget, the day your plan renews on, and where the line reads from |
-| `lines.json` | What the feeds last gave: the notes (a gist and its link, for a story), and when they were read |
+| `lines.json` | What the feeds last gave: the notes (a hook and its link, for a story), and when they were read |
 
 It reads the session's usage from Claude Code and reads and writes those files. The one thing it does
 beyond your machine is read the thirteen feeds named under [The line](#the-line), unless you turn that off;

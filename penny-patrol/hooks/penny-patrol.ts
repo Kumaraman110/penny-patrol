@@ -85,6 +85,12 @@ type Ledger = {
   spent?: { main: number; agents: number }
   // The plan's windows as this session met them, by their kind.
   marks?: Record<string, Mark>
+  // What the session had spent when the count it is told last went back to nothing (it starts over after
+  // /login): `seen` goes on from there, so it is always the count as reported plus this.
+  carried?: number
+  // Of what is folded, what was put back from the session's days (see mend): how many prompts it was is
+  // not known.
+  mended?: number
 }
 // What the session had spent when it met a window of the plan (in all, and by the main conversation and
 // by its subagents): what it spends from there is that window's. `resetsAt` (null with none told, or once
@@ -127,7 +133,7 @@ type Link = ElementConstructor<LinkProps>
 // the person at the prompt; `href` is where it can be read in full. The first three are said by turns.
 type Topic = 'ai' | 'joke' | 'news' | 'you'
 type Pile = Exclude<Topic, 'you'>
-type Note = { topic: Topic; text: string; href?: string }
+type Note = { topic: Topic; text: string; href?: string; isWhole?: boolean }
 // Where the line reads from: the feeds too, what came with the mod alone, or nowhere (no line).
 type LineMode = 'live' | 'offline' | 'off'
 // What the feeds gave, and when.
@@ -227,12 +233,17 @@ const NOTE_MAX = 170
 const GIST_MAX = 150
 const GIST_LEAST = 48
 const LINK_MAX = 120
+// A headline of fewer words or characters than these is a label, not a hook; and a gist takes its place
+// only when it is no longer than HOOK_GIST_MOST.
+const HOOK_WORDS = 5
+const HOOK_LEAST = 28
+const HOOK_GIST_MOST = 120
 const TOLD_KEPT = 600
 const REFRESH_MS = 3_600_000
 const RETRY_MS = 30 * 60_000
 const FRESHEN_EVERY_TICKS = 600
 const FIRST_READ_MS = 4_000
-const FORMAT = 2
+const FORMAT = 3
 // A suggestion comes after COACH_LEAST prompts and up to COACH_SPREAD more, from what the last ASKED_KEPT
 // were like. A break of COLD_GAP_MS is long enough for a prompt cache to have gone cold. What a suggestion
 // was about is watched for WATCH_PROMPTS prompts, to say so when it has moved. A limit's pace is taken
@@ -250,9 +261,9 @@ const PACE_MIN_MS = 15 * 60_000
 // The kinds of note the line says by turns.
 const ROUND: Pile[] = ['ai', 'joke', 'news']
 const TOPIC: Record<Topic, { label: string; color: string }> = {
-  ai: { label: 'AI', color: 'permission' },
-  joke: { label: 'Joke', color: 'claude' },
-  news: { label: 'Good news', color: 'success' },
+  ai: { label: 'Learn something new', color: 'permission' },
+  joke: { label: 'Smile', color: 'claude' },
+  news: { label: 'Feel good', color: 'success' },
   you: { label: 'For you', color: 'warning' },
 }
 const INTRO = `This line also reads a few public feeds, every hour, for fresh jokes, AI news and good news. /${COMMAND} lines offline keeps it to what came with the mod.`
@@ -304,49 +315,55 @@ const FEEDS: Feed[] = [
   { url: () => 'https://www.goodgoodgood.co/articles/rss.xml', most: 12, read: body => stories('news', 'goodgoodgood.co', false, body) },
 ]
 // What comes with the mod. The commands and keys named here were checked against Claude Code 2.1.289.
-const AI_NOTES = [
-  '/context shows what is filling the window, category by category, as a coloured grid.',
-  '/compact takes instructions: "/compact keep the API decisions" tells the summary what to hold on to.',
-  '/btw asks a quick side question without interrupting the main conversation.',
-  '/memory opens your CLAUDE.md files: what is written there is read at the start of every session.',
-  '/rewind goes back to an earlier point of the conversation when a turn went the wrong way.',
-  '/resume picks a previous conversation up where it stopped.',
-  '/export saves the conversation to a file or the clipboard: handy for a write-up or a bug report.',
-  '/usage shows the session\'s cost, your plan\'s usage and your activity.',
-  '/effort sets how hard the model thinks: lower for routine edits, higher for the hard problem.',
-  '/model switches model mid-session: a lighter one does routine edits for a fraction of the cost.',
-  '/init writes a CLAUDE.md for a codebase: its build commands, layout and house rules in one place.',
-  '/add-dir gives the session a second working directory without a restart.',
-  '/mcp lists the MCP servers connected to the session: each one\'s tools are part of every request.',
-  'Shift+Tab cycles the permission modes. Plan mode agrees the approach before a single edit is made.',
-  'Start a line with ! to run a shell command yourself: its output lands in the conversation.',
-  'Type @ and a path to point Claude at a file: it reads that, not the whole tree.',
-  'Paste a screenshot straight into the prompt: an error dialog or a mock-up beats describing it.',
-  'claude -p "question" answers once and exits: pipe a log in, get the answer out.',
-  'A subagent works in a context window of its own: right for a wide search whose output you need not keep.',
-  'A hook can run your script before or after any tool call: format on every edit, stop a risky command.',
-  `/${COMMAND} costs lists every prompt of this session and what it cost, to the cent.`,
-  `/${COMMAND} budget 50 sets a budget for the month and adds a bar that drains against it.`,
-  'Every request sends the whole conversation again: that is why message 50 costs more than message 5.',
-  'Input read from the prompt cache costs about a tenth of fresh input. Back-to-back prompts keep it warm.',
-  'A token is about three quarters of an English word: 1,000 tokens is roughly 750 words.',
-  'Code and languages other than English take more tokens a word than plain English does.',
-  'Output tokens cost several times what input tokens do: ask for the diff, not the whole file.',
-  'Put the long document first and the question last: models answer better when the ask follows the material.',
-  'Two or three examples of what you want often beat a paragraph describing it.',
-  'Say what done looks like. "Tests pass and no new warnings" gives the model something to check itself against.',
-  'On anything big, ask for the plan before the code: a wrong plan is cheaper to fix than a wrong diff.',
-  'When an answer matters, ask the model to quote the lines it relied on: no quote, no claim.',
-  'Say what may not be touched as well as what to change: a constraint prevents the helpful extra.',
-  'The transformer was introduced in 2017, in a paper called "Attention Is All You Need".',
-  'The phrase "artificial intelligence" was coined for a summer workshop at Dartmouth in 1956.',
-  'ELIZA, a 1966 chatbot made of pattern matching, had people sure it understood them: the ELIZA effect.',
-  'GPT stands for generative pre-trained transformer.',
-  'RAG, retrieval-augmented generation: look it up first, then let the model write with the sources in front of it.',
-  'Temperature trades repeatability for variety: low for extraction, higher for brainstorming.',
-  'A model knows nothing after its training cut-off: for anything recent, give it the page or let it search.',
-  'A language model predicts the next token. Everything else, from poems to pull requests, is that, repeated.',
-  'The context window is all the model has to work with in a request: what is not in it does not exist for it.',
+// Where each of the notes below can be read in full. Every one of these pages was fetched, and its title
+// read, on the day it was put here (2026-10-06).
+const DOCS = 'https://code.claude.com/docs/en'
+const PLATFORM = 'https://platform.claude.com/docs/en'
+const WIKI = 'https://en.wikipedia.org/wiki'
+const README_COMMANDS = 'https://github.com/Kumaraman110/penny-patrol#slash-commands'
+const AI_NOTES: Array<[string, string]> = [
+  ['/context shows what is filling the window, category by category, as a coloured grid.', `${DOCS}/context-window`],
+  ['/compact takes instructions: "/compact keep the API decisions" tells the summary what to hold on to.', `${DOCS}/commands`],
+  ['/btw asks a quick side question without interrupting the main conversation.', `${DOCS}/commands`],
+  ['/memory opens your CLAUDE.md files: what is written there is read at the start of every session.', `${DOCS}/memory`],
+  ['/rewind goes back to an earlier point of the conversation when a turn went the wrong way.', `${DOCS}/checkpointing`],
+  ['/resume picks a previous conversation up where it stopped.', `${DOCS}/commands`],
+  ['/export saves the conversation to a file or the clipboard: handy for a write-up or a bug report.', `${DOCS}/commands`],
+  ['/usage shows the session\'s cost, your plan\'s usage and your activity.', `${DOCS}/costs`],
+  ['/effort sets how hard the model thinks: lower for routine edits, higher for the hard problem.', `${DOCS}/model-config`],
+  ['/model switches model mid-session: a lighter one does routine edits for a fraction of the cost.', `${DOCS}/model-config`],
+  ['/init writes a CLAUDE.md for a codebase: its build commands, layout and house rules in one place.', `${DOCS}/memory`],
+  ['/add-dir gives the session a second working directory without a restart.', `${DOCS}/commands`],
+  ['/mcp lists the MCP servers connected to the session: each one\'s tools are part of every request.', `${DOCS}/mcp`],
+  ['Shift+Tab cycles the permission modes. Plan mode agrees the approach before a single edit is made.', `${DOCS}/permission-modes`],
+  ['Start a line with ! to run a shell command yourself: its output lands in the conversation.', `${DOCS}/interactive-mode`],
+  ['Type @ and a path to point Claude at a file: it reads that, not the whole tree.', `${DOCS}/common-workflows`],
+  ['Paste a screenshot straight into the prompt: an error dialog or a mock-up beats describing it.', `${DOCS}/common-workflows`],
+  ['claude -p "question" answers once and exits: pipe a log in, get the answer out.', `${DOCS}/headless`],
+  ['A subagent works in a context window of its own: right for a wide search whose output you need not keep.', `${DOCS}/sub-agents`],
+  ['A hook can run your script before or after any tool call: format on every edit, stop a risky command.', `${DOCS}/hooks-guide`],
+  [`/${COMMAND} costs lists every prompt of this session and what it cost, to the cent.`, README_COMMANDS],
+  [`/${COMMAND} budget 50 sets a budget for the month and adds a bar that drains against it.`, README_COMMANDS],
+  ['Every request sends the whole conversation again: that is why message 50 costs more than message 5.', `${DOCS}/costs`],
+  ['Input read from the prompt cache costs about a tenth of fresh input. Back-to-back prompts keep it warm.', `${PLATFORM}/build-with-claude/prompt-caching`],
+  ['A token is about three quarters of an English word: 1,000 tokens is roughly 750 words.', `${PLATFORM}/about-claude/glossary`],
+  ['Code and languages other than English take more tokens a word than plain English does.', `${PLATFORM}/build-with-claude/token-counting`],
+  ['Output tokens cost several times what input tokens do: ask for the diff, not the whole file.', `${PLATFORM}/about-claude/pricing`],
+  ['Put the long document first and the question last: models answer better when the ask follows the material.', `${PLATFORM}/build-with-claude/prompt-engineering/claude-prompting-best-practices`],
+  ['Two or three examples of what you want often beat a paragraph describing it.', `${PLATFORM}/build-with-claude/prompt-engineering/claude-prompting-best-practices`],
+  ['Say what done looks like. "Tests pass and no new warnings" gives the model something to check itself against.', `${DOCS}/best-practices`],
+  ['On anything big, ask for the plan before the code: a wrong plan is cheaper to fix than a wrong diff.', `${DOCS}/best-practices`],
+  ['When an answer matters, ask the model to quote the lines it relied on: no quote, no claim.', `${PLATFORM}/test-and-evaluate/strengthen-guardrails/reduce-hallucinations`],
+  ['Say what may not be touched as well as what to change: a constraint prevents the helpful extra.', `${DOCS}/best-practices`],
+  ['The transformer was introduced in 2017, in a paper called "Attention Is All You Need".', 'https://arxiv.org/abs/1706.03762'],
+  ['The phrase "artificial intelligence" was coined for a summer workshop at Dartmouth in 1956.', `${WIKI}/Dartmouth_workshop`],
+  ['ELIZA, a 1966 chatbot made of pattern matching, had people sure it understood them: the ELIZA effect.', `${WIKI}/ELIZA_effect`],
+  ['GPT stands for generative pre-trained transformer.', `${WIKI}/Generative_pre-trained_transformer`],
+  ['RAG, retrieval-augmented generation: look it up first, then let the model write with the sources in front of it.', `${WIKI}/Retrieval-augmented_generation`],
+  ['Temperature trades repeatability for variety: low for extraction, higher for brainstorming.', `${PLATFORM}/about-claude/glossary`],
+  ['A model knows nothing after its training cut-off: for anything recent, give it the page or let it search.', `${WIKI}/Knowledge_cutoff`],
+  ['A language model predicts the next token. Everything else, from poems to pull requests, is that, repeated.', `${WIKI}/Large_language_model`],
+  ['The context window is all the model has to work with in a request: what is not in it does not exist for it.', `${PLATFORM}/build-with-claude/context-windows`],
 ]
 const JOKES = [
   'Before AI I sent the email. Now I paste it into Copilot, paste that into Outlook, and the receiver hits Summarise to read what I first typed into Copilot.',
@@ -830,6 +847,10 @@ async function book($: EngineInterface, agentId: string | null): Promise<void> {
     isHidden = mine?.isHidden === true
     const saved = await load($, `days/${tag}.json`)
     days = isDays(saved) ? saved : {}
+
+    if (ledger !== null) {
+      mend(ledger)
+    }
     // Its own dice, so no two sessions say the same things in the same order; and a clean slate for the
     // suggestions, which are about this conversation alone.
     seed = seedOf(tag, startedAt)
@@ -861,20 +882,27 @@ async function book($: EngineInterface, agentId: string | null): Promise<void> {
     return
   }
 
-  if (ledger === null || cost.usd < ledger.seen - 0.005) {
-    // The first look at this count: nothing spent so far can be itemised.
+  if (ledger === null) {
+    // The first look at this session's count: nothing spent so far can be itemised.
     ledger = { seen: cost.usd, untracked: cost.usd, folded: { usd: 0, prompts: 0 }, steps: 0, nextSeq: 1, turns: [], agents: {}, spent: { main: 0, agents: 0 } }
+  } else if (cost.usd + (ledger.carried ?? 0) < ledger.seen - 0.005) {
+    // The count went back: it starts over after /login. What this session had spent is still spent, so
+    // all that was seen is carried and the count goes on from there. (The ledger used to begin again
+    // here: the session's cost, its prompts and its plan windows were gone from the band.)
+    ledger.carried = ledger.seen
   }
 
+  // The session's total: the count as reported, on top of what was carried.
+  const total = cost.usd + (ledger.carried ?? 0)
   // Before the rise is booked: a window met in this look begins at what was spent until now.
   markWindows()
-  const rise = cost.usd - ledger.seen
+  const rise = total - ledger.seen
 
   if (rise <= 0) {
     return
   }
 
-  ledger.seen = cost.usd
+  ledger.seen = total
   dayOf(nowMs).usd += rise
   let current = ledger.turns.at(-1)
 
@@ -1086,6 +1114,60 @@ function spentOf(money: Ledger): { main: number; agents: number } {
   money.spent = spent
 
   return spent
+}
+
+// How long a window of the plan runs, by its kind: when it began is its end less this.
+const WINDOW_MS: Record<string, number> = { five_hour: 5 * 3_600_000, seven_day: 7 * 86_400_000 }
+
+// Puts back what a ledger lost. Before 0.3.0 the ledger began again whenever the count went back (after
+// /login), while the session's days went on holding every dollar. So where the days hold more than the
+// ledger tracked, the difference was spent in this session and forgotten: it goes back into the total, as
+// earlier prompts (which prompts they were is gone) of the main conversation. A window the ledger met with
+// something already spent began after the loss, so all of it came before that window; one it met at
+// nothing was already running when the ledger began again, so its mark is worked out from the days, as
+// the plan's month is. True when something was put back.
+function mend(money: Ledger): boolean {
+  const walked = Object.values(days).reduce((sum, day) => sum + day.usd, 0)
+  const lost = walked - (money.seen - money.untracked)
+
+  if (!(lost > 0.005)) {
+    return false
+  }
+
+  const spent = spentOf(money)
+  money.seen += lost
+  money.carried = (money.carried ?? 0) + lost
+  money.folded.usd += lost
+  money.mended = (money.mended ?? 0) + lost
+  spent.main += lost
+  const marks = money.marks ?? {}
+
+  for (const kind of Object.keys(marks)) {
+    const mark = marks[kind]
+
+    if (!mark) {
+      continue
+    }
+
+    if (kind === PLAN) {
+      // Worked out again from the days at the next look.
+      delete marks[kind]
+    } else if (mark.usd > 0.005) {
+      marks[kind] = { ...mark, usd: mark.usd + lost, main: mark.main + lost }
+    } else {
+      const length = WINDOW_MS[kind] ?? (kind.startsWith('seven_day') ? WINDOW_MS.seven_day : undefined)
+      const ends = mark.resetsAt === null ? NaN : Date.parse(mark.resetsAt)
+
+      // When it began is not known: what was put back stays the window's own.
+      if (length !== undefined && !Number.isNaN(ends)) {
+        marks[kind] = { ...planMark(money, new Date(ends - length), ''), resetsAt: mark.resetsAt, used: mark.used }
+      }
+    }
+  }
+
+  money.marks = marks
+
+  return true
 }
 
 // Marks, for each window of the plan, where this session's spending stood when it met the window as it
@@ -1508,32 +1590,38 @@ function lineRow(Box: Box, Text: Text, Link: Link, inner: number, isTerminal: bo
   }
 
   const topic = TOPIC[note.topic]
-  const text = fitted(note, inner)
+  const fit = fitted(note, inner)
 
   return Box({
     flexDirection: 'row',
     children: [
       Text({ color: topic.color, bold: true, children: `${topic.label} ` }),
       // A note that holds the line is said even where it does not fit: it ends where the band does.
-      Text({ wrap: 'truncate-end', children: text ?? note.text }),
+      Text({ wrap: 'truncate-end', children: fit?.text ?? note.text }),
       // A terminal makes a link of an address it is shown; elsewhere it has to be given one.
-      ...(note.href === undefined || text === null
+      ...(note.href === undefined || fit === null || !fit.isLinked
         ? []
         : [Text({ children: ' ' }), isTerminal ? Text({ dimColor: true, children: note.href }) : Link({ href: note.href })]),
     ],
   })
 }
 
-// A note as it fits a line of `inner` cells after its label: whole; or, a story, its gist cut short to
-// leave its link whole. Null when it does not fit.
-function fitted(note: Note, inner: number): string | null {
-  const room = inner - TOPIC[note.topic].label.length - 1 - (note.href === undefined ? 0 : note.href.length + 1)
+// A note as it fits a line of `inner` cells after its label, and whether its link is said with it:
+// whole, with its link; or, a story, its hook cut short to leave its link whole; or, a note that came with
+// the mod and is said whole, without the link there is no room for. Null when it does not fit.
+function fitted(note: Note, inner: number): { text: string; isLinked: boolean } | null {
+  const free = inner - TOPIC[note.topic].label.length - 1
+  const room = free - (note.href === undefined ? 0 : note.href.length + 1)
 
   if (note.text.length <= room) {
-    return note.text
+    return { text: note.text, isLinked: note.href !== undefined }
   }
 
-  return note.href !== undefined && room >= GIST_LEAST ? cut(note.text, room) : null
+  if (note.isWhole === true) {
+    return note.text.length <= free ? { text: note.text, isLinked: false } : null
+  }
+
+  return note.href !== undefined && room >= GIST_LEAST ? { text: cut(note.text, room), isLinked: true } : null
 }
 
 // A text at most `most` long: whole, or cut and marked as cut: at the end of a clause when one ends in
@@ -1619,7 +1707,8 @@ function shuffle(): void {
   }
   const read = lineMode === 'live' ? fresh?.notes ?? [] : []
   const own: Record<Pile, Note[]> = {
-    ai: AI_NOTES.map((text): Note => ({ topic: 'ai', text })),
+    // What comes with the mod is said whole, each with where to read more.
+    ai: AI_NOTES.map(([text, href]): Note => ({ topic: 'ai', text, href, isWhole: true })),
     joke: JOKES.map((text): Note => ({ topic: 'joke', text })),
     news: [],
   }
@@ -2091,7 +2180,8 @@ function stories(topic: Pile, host: string, isLead: boolean, body: string): Note
   return [...body.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/g)].flatMap((found): Note[] => {
     const item = found[0]
     const title = plainOf(/<title\b[^>]*>([\s\S]*?)<\/title>/.exec(item)?.[1] ?? '')
-    const text = gistOf(/<(description|summary)\b[^>]*>([\s\S]*?)<\/\1>/.exec(item)?.[2] ?? '', title, isLead, mustName)
+    const gist = gistOf(/<(description|summary)\b[^>]*>([\s\S]*?)<\/\1>/.exec(item)?.[2] ?? '', title, isLead, mustName)
+    const text = hookOf(title, gist)
     const href = [
       /<(guid|id)\b[^>]*>\s*(https:\/\/[^\s<]+\/\?p=\d+)\s*<\/\1>/.exec(item)?.[2],
       /<link>\s*(https:\/\/[^\s<]+)\s*<\/link>/.exec(item)?.[1],
@@ -2104,6 +2194,24 @@ function stories(topic: Pile, host: string, isLead: boolean, body: string): Note
 
     return [{ topic, text, href }]
   })
+}
+
+// What the line says of a story: its HOOK. An outlet writes its headline to be read, so that is the hook,
+// as it was written; where the headline says too little to be one (a label, a few words), the gist is told
+// instead; and where only the gist has a figure in it, and is whole and short, the figure wins: a number is
+// what makes a line worth a second look. Null with neither.
+function hookOf(title: string, gist: string | null): string | null {
+  const headline = title.split(' ').filter(word => word !== '').length >= HOOK_WORDS && title.length >= HOOK_LEAST
+    ? tidy(cut(title, GIST_MAX), NOTE_MIN, GIST_MAX)
+    : null
+
+  if (headline === null || gist === null) {
+    return headline ?? gist
+  }
+
+  const hasFigure = (said: string): boolean => /\d/.test(said)
+
+  return hasFigure(gist) && !hasFigure(headline) && !gist.endsWith('...') && gist.length <= HOOK_GIST_MOST ? gist : headline
 }
 
 // Whether a link is one the line may show for an outlet: its own, plain, and no longer than a link may be.
@@ -2561,12 +2669,17 @@ function statement(money: Ledger): string {
   const totals = calendar(nowMs, everyDays())
 
   return [
-    `Session total reported by Claude Code: ${money$(bill.total)}`,
+    (money.carried ?? 0) > 0
+      ? `Session total: ${money$(bill.total)}  (Claude Code reports ${dollars(money.seen - (money.carried ?? 0))}: its count started over during this session, as it does after /login, and ${dollars(money.carried ?? 0)} had been spent by then)`
+      : `Session total reported by Claude Code: ${money$(bill.total)}`,
     ...periodsOf(money).map(period => period.isPlan
       ? `  ${'This plan month:'.padEnd(18)}${money$(period.total)}  (seen spent since ${dayMonth(planOf(nowMs).from)}: the band's cost bar. /${COMMAND} plan <day> says which day your plan renews on)`
       : `  ${`This ${period.name} window:`.padEnd(18)}${money$(period.total)}  (seen spent since it began, or since this session first met it)`),
     `  Itemised below:   ${money$(itemised)}`,
-    ...(money.folded.prompts > 0 ? [`  Earlier prompts:  ${money$(bill.folded)}  (${count(money.folded.prompts)} prompts older than the ${MAX_TURNS} kept line by line)`] : []),
+    ...(money.folded.prompts > 0 || bill.folded > 0 ? [`  Earlier prompts:  ${money$(bill.folded)}  (${[
+      ...(money.folded.prompts > 0 ? [`${count(money.folded.prompts)} prompts older than the ${MAX_TURNS} kept line by line`] : []),
+      ...((money.mended ?? 0) > 0 ? [`${dollars(money.mended ?? 0)} put back from this session's days: a ledger before 0.3.0 forgot it when the count started over`] : []),
+    ].join('; ')})`] : []),
     `  Before tracking:  ${money$(bill.before)}  (spent before this ledger first looked; cannot be itemised)`,
     `  Unaccounted:      ${money$(bill.total - bill.before - bill.folded - bill.rows.reduce((sum, row) => sum + row.amount, 0))}`,
     `  Working time:     ${stepsOf(money.steps)} (${span(money.steps)})${rate}`,
@@ -2605,7 +2718,7 @@ function audit(): string {
   if (ledger) {
     const bill = billOf(ledger)
     const listed = bill.rows.reduce((sum, row) => sum + row.amount, 0)
-    check(listed + bill.folded + bill.before === bill.total, `Cost: prompts ${money$(listed)} + earlier ${money$(bill.folded)} + before tracking ${money$(bill.before)} = ${money$(listed + bill.folded + bill.before)}; Claude Code reports ${money$(bill.total)}`)
+    check(listed + bill.folded + bill.before === bill.total, `Cost: prompts ${money$(listed)} + earlier ${money$(bill.folded)} + before tracking ${money$(bill.before)} = ${money$(listed + bill.folded + bill.before)}; ${(ledger.carried ?? 0) > 0 ? `Claude Code reports ${dollars(ledger.seen - (ledger.carried ?? 0))} on top of the ${dollars(ledger.carried ?? 0)} spent before its count started over` : `Claude Code reports ${money$(bill.total)}`}`)
     check(bill.main + bill.agents === listed, `Cost: main ${money$(bill.main)} + subagents ${money$(bill.agents)} = the prompts' ${money$(listed)}`)
     const walked = Object.values(days).reduce((sum, day) => sum + day.steps, 0)
     check(walked >= ledger.steps, `Steps: this session's days hold ${count(walked)}; its ledger counts ${count(ledger.steps)}`)
@@ -2723,6 +2836,7 @@ function isLedger(value: unknown): value is Ledger {
     && typeof v.folded === 'object' && v.folded !== null
     && (v.spent === undefined || (typeof v.spent === 'object' && v.spent !== null && typeof v.spent.main === 'number' && typeof v.spent.agents === 'number'))
     && (v.marks === undefined || (typeof v.marks === 'object' && v.marks !== null && Object.values(v.marks).every(isMark)))
+    && (v.carried === undefined || typeof v.carried === 'number') && (v.mended === undefined || typeof v.mended === 'number')
 }
 
 function isMark(value: unknown): value is Mark {
